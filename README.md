@@ -1,0 +1,2 @@
+# UpworkNotificationAssistant
+Upwork Notification Assistant
