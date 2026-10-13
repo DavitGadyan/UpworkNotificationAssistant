@@ -1,0 +1,17 @@
+services:
+  web:
+    build: { context: ., target: web }
+    env_file: .env
+    ports: ["127.0.0.1:3010:3010"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3010/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 2m
+      timeout: 10s
+      retries: 3
+      start_period: 15m
+  worker:
+    build: { context: ., target: worker }
+    env_file: .env
+    # The worker exits on a stuck tick (15 min watchdog) or crash; Docker brings it straight back.
+    restart: unless-stopped

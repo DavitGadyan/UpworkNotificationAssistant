@@ -1,0 +1,12 @@
+# /etc/nginx/sites-available/jobs.s1mpleai.org  →  ln -s into sites-enabled, then certbot --nginx -d jobs.s1mpleai.org
+server {
+    server_name jobs.s1mpleai.org;
+    location / {
+        proxy_pass http://127.0.0.1:3010;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 600s;   # proposal drafts / "Load via Claude" can take minutes
+    }
+    listen 80;
+}

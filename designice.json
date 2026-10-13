@@ -1,0 +1,230 @@
+{
+  "project": "jobpulse",
+  "prompt": "job alert assistant dashboard app shell",
+  "platform": "web",
+  "company": "JobPulse",
+  "overrides": {
+    "primary": "#1F6FEB",
+    "secondary": "#14A800",
+    "font_display": "Space Grotesk",
+    "font_body": "Inter",
+    "sections": [
+      "app-shell",
+      "overview-filter-cards",
+      "jobs-grid",
+      "job-detail",
+      "settings"
+    ],
+    "platform": "web",
+    "company": "JobPulse"
+  },
+  "notes": [
+    "accent2 #14A800 on #F0F2F4 is only 2.8:1 - fine for fills, but do not set body text in it"
+  ],
+  "template_tokens": {
+    "source": "meta",
+    "roles": {
+      "ground": "#F0F2F4",
+      "surface": "#FFFFFF",
+      "ink": "#191A1B",
+      "muted": "#858585",
+      "accent": "#4930FF",
+      "accent2": "#3828AF"
+    },
+    "palette": [
+      "#F0F2F4",
+      "#FFFFFF",
+      "#4930FF",
+      "#191A1B",
+      "#858585"
+    ],
+    "fonts": [
+      "Orbitron",
+      "Inter"
+    ],
+    "style": "minimal",
+    "mode": "light"
+  },
+  "reference_design": {
+    "slug": "chladni-ui-ux-designer-web-designer-for-saas-system",
+    "title": "Chladni - Industrial IoT Asset Performance SaaS",
+    "path": "Chladni. UI UX Designer, Web Designer for SaaS system",
+    "use_case": "Multi-screen SaaS product UI (app shell, not marketing): floating icon-rail sidebar with avatar, search-first top bar with '/' shortcut, uppercase display page titles with muted subtitle and right-aligned action buttons (Filter, Export, List/Map segmented toggle), a full-bleed Explorer panel with a floating detail card (status pill, name, timestamp, big health % with area sparkline, 2x3 stats grid, CTA), a drill-down page with breadcrumb, title + health pill, two device summary cards, a 6-tab strip and a 2-col grid of status cards, a Devices page with a 3-col card grid and pagination, a filter bar of dropdowns, and a nested 'line' card with collapsible child list. Best template for any operations console, monitoring dashboard, trading workstation, incident/ticket system or agent session UI that needs sessions -> detail -> log screens.",
+    "reference_url": "",
+    "media": [
+      {
+        "path": "Chladni. UI UX Designer, Web Designer for SaaS system/image_original1.png",
+        "kind": "image",
+        "name": "image_original1.png",
+        "format": "png",
+        "width": 3200,
+        "height": 2200,
+        "shape": "viewport"
+      },
+      {
+        "path": "Chladni. UI UX Designer, Web Designer for SaaS system/image_original2.png",
+        "kind": "image",
+        "name": "image_original2.png",
+        "format": "png",
+        "width": 3200,
+        "height": 2924,
+        "shape": "full-page"
+      },
+      {
+        "path": "Chladni. UI UX Designer, Web Designer for SaaS system/image_original3.png",
+        "kind": "image",
+        "name": "image_original3.png",
+        "format": "png",
+        "width": 3200,
+        "height": 2924,
+        "shape": "full-page"
+      },
+      {
+        "path": "Chladni. UI UX Designer, Web Designer for SaaS system/image_original4.png",
+        "kind": "image",
+        "name": "image_original4.png",
+        "format": "png",
+        "width": 3200,
+        "height": 2246,
+        "shape": "viewport"
+      },
+      {
+        "path": "Chladni. UI UX Designer, Web Designer for SaaS system/image_original5.png",
+        "kind": "image",
+        "name": "image_original5.png",
+        "format": "png",
+        "width": 3200,
+        "height": 2122,
+        "shape": "viewport"
+      },
+      {
+        "path": "Chladni. UI UX Designer, Web Designer for SaaS system/image_original6.png",
+        "kind": "image",
+        "name": "image_original6.png",
+        "format": "png",
+        "width": 3200,
+        "height": 2140,
+        "shape": "viewport"
+      },
+      {
+        "path": "Chladni. UI UX Designer, Web Designer for SaaS system/image_original7.png",
+        "kind": "image",
+        "name": "image_original7.png",
+        "format": "png",
+        "width": 3200,
+        "height": 2400,
+        "shape": "viewport"
+      },
+      {
+        "path": "Chladni. UI UX Designer, Web Designer for SaaS system/image_original8.png",
+        "kind": "image",
+        "name": "image_original8.png",
+        "format": "png",
+        "width": 3200,
+        "height": 1400,
+        "shape": "wide-banner"
+      }
+    ],
+    "score": null
+  },
+  "direction": {
+    "style": "minimal",
+    "all_styles": [
+      "minimal",
+      "swiss-editorial",
+      "retro-futurist"
+    ],
+    "industry": [
+      "saas",
+      "hardware",
+      "logistics"
+    ],
+    "layout": [
+      "sidebar",
+      "bento-grid",
+      "full-bleed"
+    ],
+    "mode": "light"
+  },
+  "tokens": {
+    "roles": {
+      "ground": "#F0F2F4",
+      "surface": "#FFFFFF",
+      "ink": "#191A1B",
+      "muted": "#858585",
+      "accent": "#1F6FEB",
+      "accent2": "#14A800"
+    },
+    "palette": [
+      "#F0F2F4",
+      "#FFFFFF",
+      "#1F6FEB",
+      "#191A1B",
+      "#858585"
+    ],
+    "fonts": [
+      "Space Grotesk",
+      "Inter"
+    ],
+    "radius": "12px",
+    "shadow": "none",
+    "section_padding_desktop": "160px",
+    "section_padding_mobile": "96px",
+    "density": "airy",
+    "type_scale": {
+      "display": "clamp(2.5rem, 5vw, 4rem)",
+      "h1": "clamp(2rem, 4vw, 3.25rem)",
+      "h2": "clamp(1.5rem, 2.5vw, 2.25rem)",
+      "body": "16px",
+      "leading_display": "1.1"
+    }
+  },
+  "sections": [
+    "app-shell",
+    "overview-filter-cards",
+    "jobs-grid",
+    "job-detail",
+    "settings"
+  ],
+  "motion": [
+    {
+      "technique": "static",
+      "tool": "none",
+      "note": "motion limited to hover and focus states"
+    }
+  ],
+  "image_prompts": [
+    {
+      "slot": "hero",
+      "aspect_ratio": "16:9",
+      "prompt": "Wide cinematic hero image for a saas, hardware website. JobPulse. minimal, swiss-editorial art direction, palette #F0F2F4, #FFFFFF, #4930FF, #191A1B, no text, no watermark, no UI chrome. Strong single focal point positioned off-centre with generous negative space on the left third for a headline overlay. Shallow depth of field, controlled contrast so white type stays readable over it."
+    },
+    {
+      "slot": "feature-texture",
+      "aspect_ratio": "1:1",
+      "prompt": "Abstract close-up texture evoking saas, hardware. minimal, swiss-editorial art direction, palette #F0F2F4, #FFFFFF, #4930FF, #191A1B, no text, no watermark, no UI chrome. Macro detail, soft directional light, extremely shallow depth of field, reads as a background at low opacity rather than as a subject."
+    },
+    {
+      "slot": "section-support",
+      "aspect_ratio": "4:3",
+      "prompt": "Editorial supporting photograph for a saas, hardware website section. JobPulse. minimal, swiss-editorial art direction, palette #F0F2F4, #FFFFFF, #4930FF, #191A1B, no text, no watermark, no UI chrome. Documentary framing, natural light, one human gesture or one object in use, nothing staged or stock-like."
+    },
+    {
+      "slot": "og-card",
+      "aspect_ratio": "16:9",
+      "prompt": "Open Graph share card background for a saas, hardware brand. minimal, swiss-editorial art direction, palette #F0F2F4, #FFFFFF, #4930FF, #191A1B, no text, no watermark, no UI chrome. Simple, high contrast, centre kept visually quiet so a logo and title can be composited on top."
+    }
+  ],
+  "constraints": [
+    "No purple-to-blue gradient on a white card unless the reference design actually uses one.",
+    "No emoji as icons. Use a real icon set or draw inline SVG.",
+    "Body text is never below 15px, and never pure #000 on pure #FFF.",
+    "Every section must differ from its neighbour in background, rhythm or column count - eleven identical centred slabs is the single clearest tell of a generated page.",
+    "Buttons need real hover, focus-visible and active states, not just a colour change.",
+    "Respect prefers-reduced-motion: hold transforms, keep opacity fades.",
+    "Images need explicit width/height or aspect-ratio so nothing shifts on load.",
+    "Ship real copy, not lorem ipsum, and not three-word headlines that say nothing.",
+    "Restraint is the brand. If a decoration can be removed without loss, remove it."
+  ],
+  "source_description": "My role. UI UX design, Web design\n\nProject description.\n\nContext. Chladni is an industrial IoT platform for asset performance management, monitoring pumps, motors, and production lines via wireless sensors deployed across plants worldwide.\n\nRole. End to end UI UX Designer, owning user flows, IA, web design, and UI design system.\n\nWhat I did. Mapped UX flows across Dashboard, Explorer, Incidents, Work Orders, and Devices. Delivered web design and UI UX for the real time fleet view with map, health scored cards, and asset drill downs. Built the UI design system for engineering handoff.\nSkills and deliverables\n\nUX & UI\nUX Wireframe\nUI Graphics\nUI/UX Prototyping\nSaaS\nDashboard surfaces the four metrics maintenance teams actually act on - health score, incidents, open work orders, savings and downtime. \nDashboard surfaces the four metrics maintenance teams actually act on - health score, incidents, open work orders, savings and downtime.\nOutcome\n\nA platform that reads industrial telemetry as actionable signals - not raw data engineers have to interpret.\nChallenge\n\nSurface telemetry from hundreds of sensors as actionable signals for maintenance teams - not a data dump engineers have to interpret.\nWhat I did\n\n- Mapped user flow across 9 product areas\n- Designed geo-zoned fleet map with health states\n- Built asset drill-down (6 tabs)\n- IoT device view tracking signal & battery\n- Design system, light/dark, Orbitron identity\nSite explorer with geo-zoned health colors - green/yellow/red plant boundaries make global fleet status legible at a glance.\nSite explorer with geo-zoned health colors - green/yellow/red plant boundaries make global fleet status legible at a glance.\nDevices monitored as a grid with status, signal strength, battery, and asset linkage - IoT fleet management without the spreadsheet feel.\nDevices monitored as a grid with status, signal strength, battery, and asset linkage - IoT fleet management without the spreadsheet feel.\nSchedule-for-later, activity log with attachments, and the full screen map covering 9 product areas - system designed for scale. \nSchedule-for-later, activity log with attachments, and the full screen map covering 9 product areas - system designed for scale.\nClose-up of the user flow showing how Login branches into Dashboard, Header, Explorer, Incidents, Work Orders, Settings.\nClose-up of the user flow showing how Login branches into Dashboard, Header, Explorer, Incidents, Work Orders, Settings.\n\n\n\n\n\nui ux designer | ui ux designer shopify | game ui ux designer | ui ux designer ai | ui ux designer crypto | ui ux designer wix | figma | graphic designer | product designer | web design | web designer | website designer | wix web design | webflow designer | shopify website design | wordpress website designer | ux designer | ui | ui/ux designer | web developer | wordpress | website | mobile app design | mobile app designer | figma mobile app designer | mobile app design ai | mobile app logo design | AI-powered | SaaS | landing page | Wireframing | user flow | developer handoff | design system | reusable components | CSS | UX & UI | User Experience Design | Adobe Photoshop | JavaScript | HTML | Landing Page | User Interface Design | Logo Design | HTML5 | Mobile UI Design | PHP | Adobe Illustrator | CSS 3 | Webflow | Web Application | Responsive Design | Mobile App Design | Ecommerce | User Experience | UI/UX Prototyping | Branding | Adobe InDesign | UX & UI Design | Custom Web Design | Logo | Brand Identity | Website Redesign | Design Concept | Marketing | Interactive Design | Web Development | Elementor | Cryptocurrency | UIKit | Mobile App | Mobile App Redesign | UI Graphics | Software Design | Cryptography | Real Estate | Illustration | jQuery | Mobile App Development | Prototyping | Adobe XD | Flutter | Android App Development | iOS Development | UX Research | Android | Usability Testing | Data Visualization | App Development | Smartphone | App Design | React Native | Android App | Firebase | Node.js | User Testing | Hybrid App Development | Product Demonstration | React | Mockup | Swift | MongoDB | Dashboard | Information Architecture | Adobe After Effects | Brand Identity Design | User Experience Strategy | Health & Fitness | API Integration | Full-Stack Development | iOS | Growth Strategy | Gamification | Mobile App Development Consultation | AI Mobile App Development | Case Studies | Java | Desktop Application | Kotlin | Animals & Pets | Pets | Front-End Development"
+}

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Keeps the polling worker running on this Mac (restarts on crash or watchdog exit).
+  Install:  cp deploy/macos/org.s1mpleai.pulse.worker.plist ~/Library/LaunchAgents/ &&
+            launchctl load -w ~/Library/LaunchAgents/org.s1mpleai.pulse.worker.plist
+  Remove:   launchctl unload -w ~/Library/LaunchAgents/org.s1mpleai.pulse.worker.plist
+  Logs:     tail -f data/worker.log
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>org.s1mpleai.pulse.worker</string>
+  <key>WorkingDirectory</key><string>/Users/dyada/Desktop/Github/UpworkNotificationAssistant</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string><string>-lc</string>
+    <string>exec npx tsx --env-file=.env worker/index.ts</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>/Users/dyada/Desktop/Github/UpworkNotificationAssistant/data/worker.log</string>
+  <key>StandardErrorPath</key><string>/Users/dyada/Desktop/Github/UpworkNotificationAssistant/data/worker.log</string>
+</dict>
+</plist>

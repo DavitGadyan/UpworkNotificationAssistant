@@ -1,0 +1,80 @@
+{
+  "_note": "Starting hypotheses about negotiation style by client country, adapted from a widely shared negotiation post (video credit: Liberate_labs). They are tendencies to test, never rules about a person: the client's own messages always override them, and the Closer never mentions nationality. Edit freely in Settings → Closer.",
+  "default": {
+    "summary": "Unknown culture: mirror the client's length, formality and pace. Lead with clarity and one concrete next step.",
+    "do": ["Mirror the client's register and message length", "Be specific about outcomes, timeline and price", "Ask one question at a time"],
+    "avoid": ["Long walls of text", "Assuming familiarity"]
+  },
+  "Russia": {
+    "summary": "Cut the small talk and jokes; excessive politeness can read as weakness. Be direct, confident and expert.",
+    "do": ["Get to the point in the first line", "State your position firmly and back it with expertise", "Use numbers and concrete plans"],
+    "avoid": ["Over-apologising or excessive pleasantries", "Jokes in early messages", "Conceding quickly"]
+  },
+  "Germany": {
+    "summary": "They arrive prepared - know your numbers inside and out. Precision, structure and reliability win.",
+    "do": ["Give a structured plan with milestones, dates and assumptions", "Quantify estimates and explain the basis", "Put agreements in writing"],
+    "avoid": ["Vague promises", "Changing numbers without a reason", "Over-selling"]
+  },
+  "Saudi Arabia": {
+    "summary": "You are a person first and a business partner second: build personal trust before the deal.",
+    "do": ["Open warmly and personally", "Invest in rapport and a call before pushing terms", "Show respect and long-term commitment"],
+    "avoid": ["Rushing to price in the first message", "Purely transactional tone"],
+    "alsoApplies": ["United Arab Emirates", "Qatar", "Kuwait", "Bahrain", "Oman", "Jordan", "Egypt"]
+  },
+  "United Kingdom": {
+    "summary": "Logic is key - if the pitch doesn't make inherent sense they quietly disappear. Understated, reasoned, polite.",
+    "do": ["Explain the reasoning behind your approach", "Be understated and precise", "Keep a courteous, low-pressure tone"],
+    "avoid": ["Hype and superlatives", "Hard closing", "Gaps in logic"]
+  },
+  "United States": {
+    "summary": "Results-oriented: you can be quirky, blunt or unconventional as long as you deliver the bottom line.",
+    "do": ["Lead with the outcome and ROI", "Be confident and concise", "Propose a clear next step and timeline"],
+    "avoid": ["Long preambles", "Hedging"]
+  },
+  "China": {
+    "summary": "Silence is a tool for thought. Make your offer, then resist the urge to over-talk afterwards.",
+    "do": ["Make a clear offer and give them time", "Show long-term reliability", "Be patient with follow-ups"],
+    "avoid": ["Filling silence with extra concessions", "Rapid-fire follow-ups"]
+  },
+  "India": {
+    "summary": "The first number is rarely final - leave room to manoeuvre.",
+    "do": ["Anchor with a well-justified number and room to trade", "Trade concessions for scope or terms"],
+    "avoid": ["Opening with your floor price"]
+  },
+  "Japan": {
+    "summary": "Real decisions often happen before the formal meeting; consensus matters. An invitation to talk further is a strong signal.",
+    "do": ["Be formal and precise", "Give material they can circulate internally", "Respect process and timelines"],
+    "avoid": ["Pressure to decide on the spot", "Over-familiarity"]
+  },
+  "France": {
+    "summary": "Expect healthy debate - they test your thinking. Stand your ground and defend your reasoning.",
+    "do": ["Engage intellectually with their challenges", "Defend your recommendations with arguments", "Show craftsmanship and depth"],
+    "avoid": ["Folding at the first push-back", "Shallow answers"]
+  },
+  "Turkey": {
+    "summary": "Big deals are often closed over dinner rather than in the boardroom: relationship and hospitality matter.",
+    "do": ["Build a personal connection", "Offer a call to talk it through"],
+    "avoid": ["Purely transactional exchanges"]
+  },
+  "Canada": {
+    "summary": "Generally easy and friendly to negotiate with - polite, fair and collaborative.",
+    "do": ["Be friendly and collaborative", "Be transparent about price and process"],
+    "avoid": ["Aggressive tactics"]
+  },
+  "Australia": {
+    "summary": "Informal, direct and allergic to hype; straight talk builds trust.",
+    "do": ["Be plain-spoken and practical", "Use first names and a relaxed tone"],
+    "avoid": ["Over-formality", "Overselling"],
+    "alsoApplies": ["New Zealand"]
+  },
+  "Netherlands": {
+    "summary": "Very direct and pragmatic; value efficiency and honesty.",
+    "do": ["Be direct and honest about trade-offs", "Keep it efficient"],
+    "avoid": ["Sugar-coating", "Unnecessary formality"]
+  },
+  "Israel": {
+    "summary": "Direct, fast and comfortable with debate; expect hard questions and quick decisions.",
+    "do": ["Answer directly and fast", "Show technical depth", "Hold your ground with reasons"],
+    "avoid": ["Slow, overly formal replies"]
+  }
+}

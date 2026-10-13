@@ -1,0 +1,349 @@
+"use client";
+
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
+import { FeedbackButtons } from "@/components/FeedbackButtons";
+import { IconCheck, IconExternal, IconLink, IconRefresh, IconSend } from "@/components/icons";
+import { Bullets, Note, Spinner } from "@/components/ui/bits";
+import { CopyButton } from "@/components/ui/CopyButton";
+import { CONTACT_ROLE_LABELS, fmtDateTime, PROPOSAL_STATUS, percentChanged } from "@/lib/format";
+import type { Proposal } from "@/lib/types";
+
+const LOOM_PLACEHOLDER = "{{LOOM_URL}}";
+// A loom.com link or a branded short link (Rebrandly…); the server follows redirects and checks it lands on Loom.
+const LOOM_RE = /^https:\/\/[^\s/]+\.[^\s/]+\/\S+$/;
+const MAX = 5000;
+
+type Action = "save" | "loom" | "approve" | "preview" | "submit" | "discard" | "rewrite";
+
+/** The full submit gate on one page: edit → Loom → approve → Upwork preview → typed SUBMIT. */
+export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { initial: Proposal; screeningQuestions: string[]; connectsCost: number | null }) {
+  const router = useRouter();
+  const [p, setP] = useState(initial);
+  const [cover, setCover] = useState(initial.coverLetter);
+  const [answers, setAnswers] = useState(() => {
+    const qs = initial.answers.length ? initial.answers : screeningQuestions.map((q) => ({ question: q, answer: "" }));
+    return qs.map((a) => ({ ...a }));
+  });
+  const [bid, setBid] = useState(initial.bid != null ? String(initial.bid) : "");
+  const [duration, setDuration] = useState(initial.estimatedDuration ?? "");
+  const [loom, setLoom] = useState(initial.loomUrl ?? "");
+  const [busy, setBusy] = useState<Action | null>(null);
+  const [error, setError] = useState<{ at: Action; msg: string } | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [typed, setTyped] = useState("");
+
+  const dirty = cover !== p.coverLetter
+    || JSON.stringify(answers) !== JSON.stringify(p.answers.length ? p.answers : screeningQuestions.map((q) => ({ question: q, answer: "" })))
+    || bid !== (p.bid != null ? String(p.bid) : "")
+    || duration !== (p.estimatedDuration ?? "");
+  const locked = p.status === "submitted" || p.status === "discarded";
+  const changed = useMemo(() => percentChanged(p.originalDraft.replaceAll(LOOM_PLACEHOLDER, p.loomUrl ?? LOOM_PLACEHOLDER), cover), [p.originalDraft, p.loomUrl, cover]);
+
+  const call = async (at: Action, url: string, init: RequestInit, done?: string) => {
+    setBusy(at); setError(null); setOk(null);
+    try {
+      const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...init });
+      const body = (await res.json().catch(() => ({}))) as Proposal & { error?: string };
+      if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
+      setP(body); setCover(body.coverLetter); setLoom(body.loomUrl ?? "");
+      if (body.answers.length) setAnswers(body.answers.map((a) => ({ ...a })));
+      setBid(body.bid != null ? String(body.bid) : ""); setDuration(body.estimatedDuration ?? "");
+      if (done) setOk(done);
+      router.refresh();
+      return true;
+    } catch (e) {
+      setError({ at, msg: (e as Error).message });
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  };
+  const save = () => call("save", `/api/proposals/${p.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ coverLetter: cover, answers, bid: bid === "" ? null : Number(bid), estimatedDuration: duration }),
+  }, p.status === "approved" || p.status === "previewed" ? "Saved. Editing after approval needs a new approval and preview." : "Saved");
+  // Restructures the draft to ≤ 900 chars server-side (~30-60s). No body; returns the updated proposal.
+  const rewrite = () => {
+    if (dirty && !confirm("Rewriting replaces your unsaved edits. Continue?")) return;
+    call("rewrite", `/api/proposals/${p.id}/rewrite`, { method: "POST" }, "Rewritten shorter");
+  };
+  const act = (a: Exclude<Action, "save" | "rewrite">, body?: object, done?: string) => call(a, `/api/proposals/${p.id}/${a}`, { method: "POST", body: JSON.stringify(body ?? {}) }, done);
+
+  // Stepper
+  const has = (...s: Proposal["status"][]) => s.includes(p.status);
+  const steps = [
+    { label: "Draft", done: true },
+    { label: "Loom", done: !!p.loomUrl },
+    { label: "Approved", done: has("approved", "previewed", "submitted") },
+    { label: "Preview", done: has("previewed", "submitted") },
+    { label: "Submitted", done: has("submitted") },
+  ];
+  const current = steps.findIndex((s) => !s.done);
+  const st = PROPOSAL_STATUS[p.status] ?? { label: p.status, cls: "pill-neutral" };
+  const upwork = (p.preview?.upwork ?? null) as Record<string, unknown> | null;
+  const r = p.research;
+  const err = (at: Action) => error?.at === at && <p role="alert" className="mt-3 rounded-[12px] bg-[var(--color-bad-soft)] p-3 text-[14px] text-[var(--color-bad)]">{error.msg}</p>;
+
+  return (
+    <div className="grid gap-4">
+      {/* Stepper */}
+      <section className="card p-4 md:p-5" aria-label="Progress">
+        <ol className="grid grid-cols-5 gap-1.5">
+          {steps.map((s, i) => {
+            const isCur = i === current && !locked;
+            return (
+              <li key={s.label} className="min-w-0" aria-current={isCur ? "step" : undefined}>
+                <div className={`h-1.5 rounded-full ${s.done ? "bg-[var(--color-good)]" : isCur ? "bg-[var(--color-ink)]" : "bg-[var(--color-line)]"}`} />
+                <p className={`mt-2 flex items-center gap-1 truncate text-[12px] font-medium sm:text-[14px] ${s.done ? "text-[var(--color-good)]" : isCur ? "text-[var(--color-ink)]" : "text-[var(--color-faint)]"}`}>
+                  {s.done && <IconCheck size={14} className="hidden shrink-0 sm:block" />}{s.label}
+                </p>
+              </li>
+            );
+          })}
+        </ol>
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--color-line)] pt-4 text-[14px]">
+          <span className={`pill ${st.cls}`}>{st.label}</span>
+          <span className="text-[var(--color-muted)]">Nothing is sent to Upwork until you submit here.</span>
+        </div>
+      </section>
+
+      {p.status === "discarded" && <Note>This draft was discarded. It is kept for the feedback loop and can still be read.</Note>}
+      {p.status === "submitted" && <Note tone="good">Submitted to Upwork {p.submittedAt ? fmtDateTime(p.submittedAt) : ""}. Follow the client conversation in Closer.</Note>}
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+        {/* Left: the text */}
+        <div className="grid min-w-0 gap-4">
+          <section className="card p-5 md:p-6" aria-labelledby="cl-h">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 id="cl-h" className="display text-[20px] font-semibold">Cover letter</h2>
+              <span className="flex items-center gap-2">
+                <span className={`pill num ${changed === 0 ? "pill-neutral" : changed < 25 ? "pill-info" : "pill-warn"}`} title="Share of words changed compared with the original AI draft">{changed}% changed</span>
+                {!locked && (
+                  <button type="button" className="btn btn-sm" onClick={rewrite} disabled={busy !== null} aria-busy={busy === "rewrite"}
+                    title="Restructure the draft and cut it to about 900 characters">
+                    {busy === "rewrite" ? <><Spinner />Rewriting…</> : <><IconRefresh size={16} />Rewrite shorter</>}
+                  </button>
+                )}
+                <CopyButton text={cover} />
+              </span>
+            </div>
+            {busy === "rewrite" && <p className="mt-3 text-[13px] text-[var(--color-muted)]" aria-live="polite">Rewriting - this usually takes 30 to 60 seconds.</p>}
+            {err("rewrite")}
+            {ok === "Rewritten shorter" && busy === null && <p className="mt-3 inline-flex items-center gap-1.5 text-[14px] text-[var(--color-good)]"><IconCheck size={16} />Rewritten shorter. Review it, then save or approve as usual.</p>}
+            {cover.includes(LOOM_PLACEHOLDER) && <Note tone="warn" className="mt-3">The letter still contains the {LOOM_PLACEHOLDER} placeholder. Attaching your Loom link replaces it.</Note>}
+            <textarea
+              aria-label="Cover letter" className="input mt-4 min-h-[340px] py-3 leading-relaxed md:min-h-[440px]" value={cover} maxLength={MAX} disabled={locked}
+              onChange={(e) => setCover(e.target.value)}
+            />
+            <p className={`num mt-1.5 text-right text-[13px] ${cover.length > MAX * 0.95 ? "text-[var(--color-bad)]" : "text-[var(--color-muted)]"}`}>{cover.length.toLocaleString()} / {MAX.toLocaleString()}</p>
+          </section>
+
+          {answers.length > 0 && (
+            <section className="card p-5 md:p-6" aria-labelledby="qa-h">
+              <h2 id="qa-h" className="display text-[20px] font-semibold">Screening answers</h2>
+              <div className="mt-4 grid gap-4">
+                {answers.map((a, i) => (
+                  <label key={i} className="field">
+                    <span className="text-[14px] text-[var(--color-ink)]">{i + 1}. {a.question}</span>
+                    <textarea className="input min-h-[110px] py-3 leading-relaxed" value={a.answer} disabled={locked}
+                      onChange={(e) => setAnswers(answers.map((x, j) => (j === i ? { ...x, answer: e.target.value } : x)))} />
+                  </label>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section className="card p-5 md:p-6" aria-labelledby="terms-h">
+            <h2 id="terms-h" className="display text-[20px] font-semibold">Terms</h2>
+            <div className="mt-4 grid grid-cols-2 gap-4">
+              <label className="field"><span>Bid ($, hourly rate or fixed total)</span>
+                <input className="input num" type="number" min="0" step="1" inputMode="decimal" value={bid} disabled={locked} onChange={(e) => setBid(e.target.value)} placeholder="e.g. 120" /></label>
+              <label className="field"><span>Estimated duration</span>
+                <input className="input" value={duration} disabled={locked} onChange={(e) => setDuration(e.target.value)} placeholder="e.g. 1 to 3 months" /></label>
+            </div>
+            {connectsCost != null && <p className="mt-3 text-[14px] text-[var(--color-muted)]">This job costs {connectsCost} Connects to apply.</p>}
+          </section>
+
+          {!locked && (
+            <div className={`${dirty ? "sticky bottom-[96px] md:bottom-4" : ""} z-10 flex flex-wrap items-center gap-3 rounded-[16px] border border-[var(--color-line)] bg-[var(--color-surface)]/95 p-3 backdrop-blur`}>
+              <button type="button" className="btn btn-dark" disabled={!dirty || busy === "save"} onClick={save}>{busy === "save" ? <><Spinner />Saving…</> : "Save changes"}</button>
+              {dirty ? <span className="text-[14px] text-[var(--color-warn)]">Unsaved changes</span> : ok ? <span className="inline-flex items-center gap-1.5 text-[14px] text-[var(--color-good)]"><IconCheck size={16} />{ok}</span> : <span className="text-[14px] text-[var(--color-muted)]">All changes saved</span>}
+              {error?.at === "save" && <span role="alert" className="w-full text-[14px] text-[var(--color-bad)]">{error.msg}</span>}
+            </div>
+          )}
+        </div>
+
+        {/* Right: research + gate */}
+        <div className="grid min-w-0 gap-4">
+          <section className="card p-5 md:p-6" aria-labelledby="gate-h">
+            <h2 id="gate-h" className="display text-[20px] font-semibold">Send it</h2>
+            <p className="mt-1 text-[14px] text-[var(--color-muted)]">Four steps, each one yours. Nothing is sent to Upwork until you submit here.</p>
+
+            {/* 1. Loom */}
+            <div className="mt-5 border-t border-[var(--color-line)] pt-4">
+              <p className="flex items-center gap-2 font-medium"><Num n={1} done={!!p.loomUrl} />Loom video</p>
+              <form className="mt-3 flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); act("loom", { url: loom.trim() }, "Loom attached"); }}>
+                <label className="sr-only" htmlFor="loom">Loom share link</label>
+                <input id="loom" className="input" type="url" inputMode="url" value={loom} disabled={locked} onChange={(e) => setLoom(e.target.value)} placeholder="https://www.loom.com/share/…" />
+                {loom && !LOOM_RE.test(loom.trim()) && <span className="text-[13px] text-[var(--color-warn)]">Paste a Loom share link or a short link that redirects to one</span>}
+                <div className="flex flex-wrap gap-2">
+                  <button type="submit" className="btn btn-sm" disabled={locked || busy === "loom" || !LOOM_RE.test(loom.trim()) || loom.trim() === p.loomUrl}>
+                    {busy === "loom" ? <Spinner /> : <IconLink size={16} />}{p.loomUrl ? "Replace Loom" : "Attach Loom"}
+                  </button>
+                  {p.loomUrl && <a className="btn btn-sm btn-ghost" href={p.loomUrl} target="_blank" rel="noopener noreferrer">Watch <IconExternal size={14} /></a>}
+                </div>
+              </form>
+              {err("loom")}
+            </div>
+
+            {/* 2. Approve */}
+            <div className="mt-4 border-t border-[var(--color-line)] pt-4">
+              <p className="flex items-center gap-2 font-medium"><Num n={2} done={has("approved", "previewed", "submitted")} />Approve the final text</p>
+              <button type="button" className="btn btn-sm mt-3" disabled={locked || !p.loomUrl || dirty || p.status !== "ready" || busy === "approve"} onClick={() => act("approve", undefined, "Approved")}>
+                {busy === "approve" ? <Spinner /> : <IconCheck size={16} />}{has("approved", "previewed") ? `Approved ${p.approvedAt ? fmtDateTime(p.approvedAt) : ""}` : "Approve"}
+              </button>
+              <p className="mt-2 text-[13px] text-[var(--color-muted)]">{!p.loomUrl ? "Attach the Loom first." : dirty ? "Save your edits first." : p.status === "ready" ? "Approving records how much you edited the draft." : ""}</p>
+              {err("approve")}
+            </div>
+
+            {/* 3. Preview */}
+            <div className="mt-4 border-t border-[var(--color-line)] pt-4">
+              <p className="flex items-center gap-2 font-medium"><Num n={3} done={has("previewed", "submitted")} />Build Upwork preview</p>
+              <button type="button" className="btn btn-sm mt-3" disabled={locked || p.status !== "approved" || busy === "preview"} onClick={() => act("preview", undefined, "Preview ready")}>
+                {busy === "preview" ? <><Spinner />Building…</> : "Build Upwork preview"}
+              </button>
+              <p className="mt-2 text-[13px] text-[var(--color-muted)]">Asks Upwork for the Connects cost, your balance and any unmet requirements. Does not submit.</p>
+              {err("preview")}
+            </div>
+
+            {/* 4. Submit */}
+            <div className="mt-4 border-t border-[var(--color-line)] pt-4">
+              <p className="flex items-center gap-2 font-medium"><Num n={4} done={has("submitted")} />Submit</p>
+              {!confirming ? (
+                <button type="button" className="btn btn-accent mt-3" disabled={locked || p.status !== "previewed"} onClick={() => { setConfirming(true); setTyped(""); }}>
+                  <IconSend size={16} />Submit to Upwork…
+                </button>
+              ) : (
+                <form className="mt-3 grid gap-2 rounded-[14px] bg-[var(--color-sunken)] p-3" onSubmit={(e) => { e.preventDefault(); act("submit", { confirm: typed }, "Submitted").then((ok) => ok && setConfirming(false)); }}>
+                  <label htmlFor="confirm" className="text-[14px]">This spends Connects and sends the proposal to the client. Type <b>SUBMIT</b> to confirm.</label>
+                  <input id="confirm" className="input" autoFocus autoComplete="off" autoCapitalize="characters" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="SUBMIT" />
+                  <div className="flex flex-wrap gap-2">
+                    <button type="submit" className="btn btn-accent" disabled={typed !== "SUBMIT" || busy === "submit"}>{busy === "submit" ? <><Spinner />Submitting…</> : "Submit proposal"}</button>
+                    <button type="button" className="btn btn-ghost" onClick={() => setConfirming(false)}>Cancel</button>
+                  </div>
+                </form>
+              )}
+              {err("submit")}
+            </div>
+
+            {!locked && (
+              <div className="mt-5 border-t border-[var(--color-line)] pt-4">
+                <button type="button" className="btn btn-sm btn-ghost btn-danger" disabled={busy === "discard"}
+                  onClick={() => confirm("Discard this draft? It stays in the list as discarded.") && act("discard", undefined, "Discarded")}>
+                  {busy === "discard" ? <Spinner /> : null}Discard draft
+                </button>
+                {err("discard")}
+              </div>
+            )}
+          </section>
+
+          {upwork && <PreviewPanel data={upwork} />}
+
+          {r && (
+            <section className="card p-5 md:p-6" aria-labelledby="res-h">
+              <h2 id="res-h" className="display text-[20px] font-semibold">Research</h2>
+              <div className="mt-4 grid gap-4 text-[15px]">
+                <div className="grid grid-cols-2 gap-3">
+                  <Kv label="Contact">{r.contactName ?? "Unknown"}{r.contactSource && <span className="block text-[13px] text-[var(--color-muted)]">{r.contactSource}</span>}</Kv>
+                  <Kv label="Company">{r.company ?? "Unknown"} <span className={`pill ml-1 align-middle ${r.companyConfidence === "confirmed" ? "pill-good" : r.companyConfidence === "likely" ? "pill-warn" : "pill-neutral"}`}>{r.companyConfidence}</span></Kv>
+                  {r.contactRole && (
+                    <div className="col-span-2"><Kv label="Contact role">
+                      <span className="pill pill-info">{CONTACT_ROLE_LABELS[r.contactRole] ?? r.contactRole}</span>
+                      {r.roleEvidence && <span className="mt-1 block text-[13px] text-[var(--color-muted)]">{r.roleEvidence}</span>}
+                    </Kv></div>
+                  )}
+                </div>
+                {r.bigFish && (
+                  <div className="rounded-[14px] bg-[var(--color-good-soft)] p-4">
+                    <p className="text-[13px] font-semibold uppercase tracking-wide text-[var(--color-good)]">Big fish</p>
+                    <p className="mt-1 leading-relaxed">{r.bigFish}</p>
+                  </div>
+                )}
+                {r.hiddenProblems.length > 0 && <Kv label="Hidden problems"><Bullets items={r.hiddenProblems} tone="warn" /></Kv>}
+                {r.whyNotSolvedInternally && <Kv label="Why they haven't solved it in-house">{r.whyNotSolvedInternally}</Kv>}
+                {r.companySignals.length > 0 && <Kv label="Company signals"><Bullets items={r.companySignals} /></Kv>}
+                {r.assumptions.length > 0 && <Kv label="Assumptions to verify"><Bullets items={r.assumptions} /></Kv>}
+              </div>
+            </section>
+          )}
+
+          <section className="card p-5 md:p-6">
+            <FeedbackButtons kind="draft" refId={String(p.id)} label="Good draft?" />
+            <p className="mt-3 text-[13px] text-[var(--color-faint)]">
+              {p.model ? `Written by ${p.model}` : ""}{p.promptVersion != null ? ` · prompt v${p.promptVersion}` : ""} · created {fmtDateTime(p.createdAt)} · <Link className="underline" href={`/jobs/${encodeURIComponent(p.jobId)}`}>job details</Link>
+            </p>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Num({ n, done }: { n: number; done: boolean }) {
+  return (
+    <span className={`grid size-6 shrink-0 place-items-center rounded-full text-[12px] font-semibold ${done ? "bg-[var(--color-good)] text-[var(--color-surface)]" : "bg-[var(--color-control)] text-[var(--color-ink)]"}`}>
+      {done ? <IconCheck size={13} /> : n}
+    </span>
+  );
+}
+
+function Kv({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <p className="mb-1 text-[13px] font-medium text-[var(--color-muted)]">{label}</p>
+      <div className="break-words leading-relaxed">{children}</div>
+    </div>
+  );
+}
+
+const HIGHLIGHT: [string, string][] = [["connects_cost", "Connects cost"], ["connects_balance", "Connects balance"], ["boost", "Boost"], ["unmet_preferred_qualifications", "Unmet preferred qualifications"]];
+
+/** Upwork's raw preview: the known fields first, then any other scalar fields, then the whole JSON. */
+function PreviewPanel({ data }: { data: Record<string, unknown> }) {
+  const flat: Record<string, unknown> = { ...((data.preview as Record<string, unknown>) ?? {}), ...data };
+  const show = (v: unknown) => (v == null ? "—" : typeof v === "object" ? (Array.isArray(v) ? (v.length ? v.map((x) => (typeof x === "object" ? JSON.stringify(x) : String(x))).join(", ") : "None") : JSON.stringify(v)) : String(v));
+  const known = HIGHLIGHT.filter(([k]) => k in flat);
+  const rest = Object.entries(flat).filter(([k, v]) => !HIGHLIGHT.some(([h]) => h === k) && k !== "preview" && (v == null || typeof v !== "object"));
+  return (
+    <section className="card p-5 md:p-6" aria-labelledby="pv-h">
+      <h2 id="pv-h" className="display text-[20px] font-semibold">Upwork preview</h2>
+      {known.length > 0 && (
+        <dl className="mt-4 grid grid-cols-2 gap-3">
+          {known.map(([k, label]) => (
+            <div key={k} className={`rounded-[14px] bg-[var(--color-sunken)] p-3 ${k === "unmet_preferred_qualifications" || k === "boost" ? "col-span-2" : ""}`}>
+              <dt className="text-[13px] text-[var(--color-muted)]">{label}</dt>
+              <dd className={`mt-0.5 break-words font-semibold ${k.startsWith("connects") ? "display num text-[26px]" : "text-[15px]"}`}>{show(flat[k])}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {rest.length > 0 && (
+        <dl className="mt-4 divide-row text-[14px]">
+          {rest.map(([k, v]) => (
+            <div key={k} className="flex justify-between gap-3 py-2">
+              <dt className="text-[var(--color-muted)]">{k.replaceAll("_", " ")}</dt>
+              <dd className="min-w-0 break-words text-right font-medium">{show(v)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      <details className="mt-4">
+        <summary className="cursor-pointer text-[14px] font-medium text-[var(--color-muted)]">Raw preview JSON</summary>
+        <pre className="mt-2 max-h-[320px] overflow-auto rounded-[12px] bg-[var(--color-sunken)] p-3 text-[12px] leading-relaxed">{JSON.stringify(data, null, 2)}</pre>
+      </details>
+    </section>
+  );
+}

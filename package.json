@@ -1,0 +1,42 @@
+{
+  "name": "upwork-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3010",
+    "build": "next build",
+    "start": "next start -p 3010",
+    "lint": "next lint",
+    "serve:standalone": "node .next/standalone/server.js",
+    "worker": "tsx --env-file=.env worker/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "worker:once": "tsx --env-file=.env worker/index.ts --once --dry-run",
+    "mcp:login": "tsx --env-file=.env scripts/mcp-login.ts",
+    "distill:playbook": "tsx --env-file=.env scripts/distill-playbook.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "better-sqlite3": "^11.8.1",
+    "next": "15.1.6",
+    "postgres": "^3.4.9",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.9",
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9.39.5",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7",
+    "typescript-eslint": "^8.71.2",
+    "vitest": "^2.1.8"
+  }
+}

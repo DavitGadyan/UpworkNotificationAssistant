@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Keeps the dashboard (web app) running on this Mac (restarts on crash or watchdog exit).
+  Install:  cp deploy/macos/org.s1mpleai.pulse.web.plist ~/Library/LaunchAgents/ &&
+            launchctl load -w ~/Library/LaunchAgents/org.s1mpleai.pulse.web.plist
+  Remove:   launchctl unload -w ~/Library/LaunchAgents/org.s1mpleai.pulse.web.plist
+  Logs:     tail -f data/web.log
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>org.s1mpleai.pulse.web</string>
+  <key>WorkingDirectory</key><string>/Users/dyada/Desktop/Github/UpworkNotificationAssistant</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string><string>-lc</string>
+    <string>exec npx next start -p 3010</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>/Users/dyada/Desktop/Github/UpworkNotificationAssistant/data/web.log</string>
+  <key>StandardErrorPath</key><string>/Users/dyada/Desktop/Github/UpworkNotificationAssistant/data/web.log</string>
+</dict>
+</plist>

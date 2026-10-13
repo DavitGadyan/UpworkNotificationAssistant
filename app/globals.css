@@ -1,0 +1,240 @@
+@import "tailwindcss";
+
+/*
+ * Tokens - re-skin of the Chladni template (see DESIGN.md "template -> yours").
+ * Brand (data-brand on <html>):
+ *   neutral (default, the only one served publicly - no third-party brand colours)
+ *   [data-brand="upwork"] - local-only look, enabled by NEXT_PUBLIC_THEME=upwork on a non-https base URL.
+ * Colour scheme (data-theme on <html>, set before paint by the inline script in app/layout.tsx):
+ *   "light" | "dark" | "system" (system = follow prefers-color-scheme).
+ * Components only ever reference these variables.
+ */
+@theme {
+  --color-ground: #F0F2F4;
+  --color-frame: #FFFFFF;
+  --color-surface: #FFFFFF;
+  --color-sunken: #F5F6F8;
+  --color-control: #F0F2F4;
+  --color-line: #E6E8EB;
+  --color-ink: #191A1B;
+  --color-muted: #6F7175;
+  --color-faint: #A3A5A8;
+  --color-accent: #1F6FEB;
+  --color-accent-strong: #1858BC;
+  --color-accent-soft: #E8F0FD;
+  --color-on-accent: #FFFFFF;
+  --color-accent2: #14A800;
+  --color-raised: #FFFFFF;
+
+  --color-good: #178A43;
+  --color-good-soft: #E6F5EC;
+  --color-warn: #9A7020;
+  --color-warn-soft: #F7EFDC;
+  --color-bad: #D23A3A;
+  --color-bad-soft: #FBE8E8;
+  --color-info: #1858BC;
+  --color-info-soft: #E8F0FD;
+
+  --font-display: var(--font-display-loaded), "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-body-loaded), "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --radius-card: 20px;
+  --radius-control: 12px;
+  --radius-pill: 6px;
+}
+
+[data-brand="upwork"] {
+  --color-ground: #F2F5F0;
+  --color-control: #EEF2EB;
+  --color-sunken: #F6F8F4;
+  --color-line: #E1E6DD;
+  --color-ink: #001E00;
+  --color-muted: #5E6D55;
+  --color-faint: #9AA595;
+  --color-accent: #14A800;
+  --color-accent-strong: #108A00;
+  --color-accent-soft: #E7F6E3;
+  --color-good: #108A00;
+  --color-good-soft: #E7F6E3;
+  --color-info: #108A00;
+  --color-info-soft: #E7F6E3;
+}
+
+
+/* Dark palette: explicit choice, and "system" when the OS prefers dark. Same roles as light; raised
+   surfaces get lighter (not darker) so chips and the floating tab bar still read as elevated. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-ground: #0B0C0E;
+  --color-frame: #111214;
+  --color-surface: #18191C;
+  --color-sunken: #1D1F23;
+  --color-control: #25272C;
+  --color-raised: #34373D;
+  --color-line: #2B2D32;
+  --color-ink: #ECEDEF;
+  --color-muted: #9C9EA3;
+  --color-faint: #6E7176;
+  --color-accent: #4C8DF6;
+  --color-accent-strong: #6FA3F7;
+  --color-accent-soft: #172741;
+  --color-on-accent: #FFFFFF;
+  --color-accent2: #3FC23A;
+  --color-good: #4CC27A;
+  --color-good-soft: #13301F;
+  --color-warn: #E0AE50;
+  --color-warn-soft: #33290F;
+  --color-bad: #F26D6D;
+  --color-bad-soft: #3B1818;
+  --color-info: #7AAAF8;
+  --color-info-soft: #172741;
+  --shadow-rail: 0 12px 40px -12px rgb(0 0 0 / 0.7);
+  --shadow-pop: 0 18px 50px -18px rgb(0 0 0 / 0.8);
+  --shadow-chip: 0 2px 6px -2px rgb(0 0 0 / 0.5);
+  --shadow-active: 0 6px 20px -6px rgb(0 0 0 / 0.6);
+  --scrim: rgb(0 0 0 / 0.6);
+}
+:root[data-brand="upwork"][data-theme="dark"] {
+  --color-accent: #3FC23A;
+  --color-accent-strong: #5FD45A;
+  --color-accent-soft: #15301A;
+  --color-good: #4CC27A;
+  --color-good-soft: #13301F;
+  --color-info: #5FD45A;
+  --color-info-soft: #15301A;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+  color-scheme: dark;
+  --color-ground: #0B0C0E;
+  --color-frame: #111214;
+  --color-surface: #18191C;
+  --color-sunken: #1D1F23;
+  --color-control: #25272C;
+  --color-raised: #34373D;
+  --color-line: #2B2D32;
+  --color-ink: #ECEDEF;
+  --color-muted: #9C9EA3;
+  --color-faint: #6E7176;
+  --color-accent: #4C8DF6;
+  --color-accent-strong: #6FA3F7;
+  --color-accent-soft: #172741;
+  --color-on-accent: #FFFFFF;
+  --color-accent2: #3FC23A;
+  --color-good: #4CC27A;
+  --color-good-soft: #13301F;
+  --color-warn: #E0AE50;
+  --color-warn-soft: #33290F;
+  --color-bad: #F26D6D;
+  --color-bad-soft: #3B1818;
+  --color-info: #7AAAF8;
+  --color-info-soft: #172741;
+  --shadow-rail: 0 12px 40px -12px rgb(0 0 0 / 0.7);
+  --shadow-pop: 0 18px 50px -18px rgb(0 0 0 / 0.8);
+  --shadow-chip: 0 2px 6px -2px rgb(0 0 0 / 0.5);
+  --shadow-active: 0 6px 20px -6px rgb(0 0 0 / 0.6);
+  --scrim: rgb(0 0 0 / 0.6);
+  }
+  :root[data-brand="upwork"]:not([data-theme="light"]) {
+  --color-accent: #3FC23A;
+  --color-accent-strong: #5FD45A;
+  --color-accent-soft: #15301A;
+  --color-good: #4CC27A;
+  --color-good-soft: #13301F;
+  --color-info: #5FD45A;
+  --color-info-soft: #15301A;
+  }
+}
+
+:root {
+  color-scheme: light;
+  --shadow-rail: 0 12px 40px -12px rgb(16 24 40 / 0.14);
+  --shadow-pop: 0 18px 50px -18px rgb(16 24 40 / 0.25);
+  --shadow-chip: 0 2px 6px -2px rgb(16 24 40 / 0.12);
+  --shadow-active: 0 6px 20px -6px rgb(16 24 40 / 0.18);
+  --scrim: rgb(16 24 40 / 0.35);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 160ms;
+}
+
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    background: var(--color-ground);
+    color: var(--color-ink);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, .display { font-family: var(--font-display); line-height: 1.1; letter-spacing: -0.01em; }
+  :focus-visible { outline: 2px solid var(--color-ink); outline-offset: 2px; border-radius: 6px; }
+  ::selection { background: var(--color-ink); color: var(--color-ground); }
+  input, select, textarea, button { font: inherit; color: inherit; }
+  code { overflow-wrap: anywhere; font-size: 0.92em; }
+  /* Browsers give fieldsets min-inline-size: min-content, which stops a scrolling control inside from shrinking. */
+  fieldset { min-inline-size: 0; }
+}
+
+@layer components {
+  /* Page titles: uppercase display, like "EXPLORER" / "DEVICES". */
+  .page-title { font-family: var(--font-display); font-weight: 700; text-transform: uppercase; font-size: clamp(1.75rem, 3vw, 2.5rem); letter-spacing: -0.005em; }
+
+  .card { background: var(--color-surface); border: 1px solid var(--color-line); border-radius: var(--radius-card); }
+  .card-link { transition: border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out); }
+  .card-link:hover { border-color: color-mix(in srgb, var(--color-ink) 22%, var(--color-line)); }
+  .card-link:active { transform: scale(0.995); }
+
+  /* Gray action buttons (Filter / Export Report) */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+    height: 46px; padding: 0 18px; border-radius: var(--radius-control);
+    background: var(--color-control); color: var(--color-ink); font-weight: 500; white-space: nowrap;
+    transition: background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+  }
+  .btn:hover { background: color-mix(in srgb, var(--color-ink) 8%, var(--color-control)); }
+  .btn:active { transform: translateY(1px); }
+  .btn:disabled { opacity: 0.5; pointer-events: none; }
+  .btn-sm { height: 38px; padding: 0 14px; font-size: 14px; }
+  .btn-dark { background: var(--color-ink); color: var(--color-surface); }
+  .btn-dark:hover { background: color-mix(in srgb, var(--color-surface) 14%, var(--color-ink)); }
+  .btn-accent { background: var(--color-accent); color: var(--color-on-accent); }
+  .btn-accent:hover { background: var(--color-accent-strong); }
+  .btn-ghost { background: transparent; }
+  .btn-ghost:hover { background: var(--color-control); }
+  .btn-danger { color: var(--color-bad); }
+
+  /* Square icon button (black "+") */
+  .icon-btn { display: grid; place-items: center; width: 46px; height: 46px; border-radius: var(--radius-control); transition: background var(--dur-fast) var(--ease-out); }
+
+  .pill { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: var(--radius-pill); font-size: 14px; font-weight: 500; white-space: nowrap; }
+  .pill-good { color: var(--color-good); background: var(--color-good-soft); }
+  .pill-warn { color: var(--color-warn); background: var(--color-warn-soft); }
+  .pill-bad { color: var(--color-bad); background: var(--color-bad-soft); }
+  .pill-info { color: var(--color-info); background: var(--color-info-soft); }
+  .pill-neutral { color: var(--color-muted); background: var(--color-control); }
+  .tag { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--color-control); font-size: 12px; font-weight: 500; letter-spacing: 0.02em; text-transform: uppercase; }
+
+  /* Segmented control / tab strip: gray track, active = white chip */
+  .seg { display: inline-flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--color-control); max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .seg-item { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; border-radius: 10px; color: var(--color-muted); font-weight: 500; white-space: nowrap; transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+  .seg-item:hover { color: var(--color-ink); }
+  .seg-item[aria-selected="true"], .seg-item[aria-pressed="true"], .seg-item[aria-current="page"] { background: var(--color-raised); color: var(--color-ink); box-shadow: var(--shadow-chip); }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field > span { font-size: 13px; color: var(--color-muted); font-weight: 500; }
+  .input {
+    height: 44px; padding: 0 14px; border-radius: var(--radius-control); border: 1px solid var(--color-line);
+    background: var(--color-surface); width: 100%; transition: border-color var(--dur-fast) var(--ease-out);
+  }
+  .input:hover { border-color: color-mix(in srgb, var(--color-ink) 25%, var(--color-line)); }
+  .input:focus-visible { outline: 2px solid var(--color-ink); outline-offset: 0; border-color: transparent; }
+
+  .divide-row > * + * { border-top: 1px solid var(--color-line); }
+  .stat-label { color: var(--color-muted); }
+  .num { font-variant-numeric: tabular-nums; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}

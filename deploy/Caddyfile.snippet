@@ -1,0 +1,5 @@
+# Append to /etc/caddy/Caddyfile on the VM (35.209.49.25), then: sudo systemctl reload caddy
+# If the VM runs nginx instead, see nginx.conf.snippet. Nothing existing (api.improvtalk…) is touched.
+jobs.s1mpleai.org {
+    reverse_proxy 127.0.0.1:3010
+}
