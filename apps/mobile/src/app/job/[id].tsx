@@ -85,7 +85,15 @@ export default function JobDetail() {
       <View style={{ height: 16 }} />
 
       {j.status === "pending" ? <Banner tone="info" title="Checking client…">The client record is still loading. The rank and alert decision update when it arrives.</Banner> : null}
-      {j.score.excluded ? <Banner tone="bad" title="Filtered out">{j.score.excluded}</Banner> : null}
+      {j.status === "awaiting_ai" ? <Banner tone="info" title="Waiting for AI check">The AI hasn&apos;t ranked this job yet (daily budget, outage or the per-cycle limit). Nothing is alerted until it has.</Banner> : null}
+      {j.score.profileFit?.verdict === "off" ? (
+        <Banner tone="neutral" title={`Not your field${j.score.profileFit.field ? ` · ${j.score.profileFit.field}` : ""}`}>{j.score.profileFit.reasons.join(". ")}</Banner>
+      ) : j.score.excluded ? <Banner tone="bad" title={j.score.excluded.startsWith("Not your field") ? "Not your field" : "Filtered out"}>{j.score.excluded}</Banner> : null}
+      {j.score.profileFit && j.score.profileFit.verdict !== "off" ? (
+        <T muted size={13} style={{ marginBottom: 12 }}>
+          {j.score.profileFit.verdict === "core" ? "Your field" : "Unclear fit"}{j.score.profileFit.field ? ` · ${j.score.profileFit.field}` : ""} — {j.score.profileFit.reasons.join("; ")}
+        </T>
+      ) : null}
 
       {intent ? (
         <>

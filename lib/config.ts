@@ -1,6 +1,6 @@
 /** Server-only configuration. Every value comes from the environment (see .env.example). */
 export const config = {
-  appName: process.env.NEXT_PUBLIC_APP_NAME ?? "Upwork Assistant",
+  appName: process.env.NEXT_PUBLIC_APP_NAME ?? "Up Assistant",
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "http://localhost:3010",
   dbPath: process.env.DB_PATH ?? "./data/jobpulse.db",
   demoMode: process.env.DEMO_MODE === "1",

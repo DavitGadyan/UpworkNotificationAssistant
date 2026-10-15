@@ -1,3 +1,4 @@
+import { aiRankingState } from "./aiStatus";
 import { getSettings, getWorkerHeartbeat, kvGet, kvSet, listSearches } from "./db";
 
 /*
@@ -66,6 +67,8 @@ export async function healthReport(now = Date.now()) {
     workerStale,
     lateAfterMin: Math.round(lateAfterMs / 60000),
     feeds,
+    /** Paused ⇒ new jobs wait for their AI check and nothing is alerted on rules alone. */
+    aiRanking: await aiRankingState(),
   };
 }
 

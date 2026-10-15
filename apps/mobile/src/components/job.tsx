@@ -19,13 +19,19 @@ export function scoreTone(score: ScoreBreakdown, s: Th): Tone {
   return "warn";
 }
 
+export const isOffProfile = (score: ScoreBreakdown) => !!score.excluded?.startsWith("Not your field");
+
+/** Match labels need the AI's verdict: a high rules-only rank says "Not AI-checked", never "Top match". */
 export function jobPill(status: JobStatus, score: ScoreBreakdown, s: Th): { label: string; tone: Tone } {
   if (status === "pending") return { label: "Checking client…", tone: "neutral" };
+  if (status === "awaiting_ai") return { label: "Waiting for AI check", tone: "neutral" };
   if (status === "dismissed") return { label: "Dismissed", tone: "neutral" };
   if (status === "applied") return { label: "Applied", tone: "good" };
   if (status === "drafting") return { label: "Drafting", tone: "info" };
+  if (isOffProfile(score)) return { label: "Not your field", tone: "neutral" };
   if (score.excluded) return { label: "Filtered out", tone: "bad" };
   if (status === "called") return { label: "Called", tone: "good" };
+  if (!score.llm && score.total >= s.telegramMin) return { label: "Not AI-checked", tone: "warn" };
   if (score.total >= s.callMin) return { label: "Top match", tone: "good" };
   if (status === "notified") return { label: "Notified", tone: "info" };
   if (score.total >= s.telegramMin) return { label: "Match", tone: "info" };

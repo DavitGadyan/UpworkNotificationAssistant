@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, View } from "react-native";
+import { Image, KeyboardAvoidingView, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Svg, { Path, Rect } from "react-native-svg";
 import { Banner, Button, Card, Field, T } from "../components/ui";
 import { haptic } from "../lib/haptics";
 import { supabase } from "../lib/supabase";
@@ -42,11 +41,8 @@ export default function SignIn() {
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.ground }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 20, paddingTop: insets.top + 20 }} keyboardShouldPersistTaps="handled">
         <View style={{ alignItems: "center", marginBottom: 28, gap: 14 }}>
-          <Svg width={64} height={64} viewBox="0 0 32 32" accessibilityLabel="Upwork Assistant logo">
-            <Rect width={32} height={32} rx={9} fill="#191A1B" />
-            <Path d="M5 17h5l3-7 5 13 3-6h6" fill="none" stroke="#fff" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" />
-          </Svg>
-          <T weight="display" size={28} style={{ textTransform: "uppercase", letterSpacing: -0.2, fontFamily: font.display }}>Upwork Assistant</T>
+          <Image source={require("../../assets/logo.png")} style={{ width: 72, height: 72 }} accessibilityLabel="Up Assistant logo" />
+          <T weight="display" size={28} style={{ textTransform: "uppercase", letterSpacing: -0.2, fontFamily: font.display }}>Up Assistant</T>
           <T muted size={15} style={{ textAlign: "center", maxWidth: 300 }}>Ranked job alerts, proposal drafts and closing advice - in your pocket.</T>
         </View>
 
@@ -69,7 +65,7 @@ export default function SignIn() {
           )}
           {error ? <Banner tone="bad" title="Sign-in failed">{error}</Banner> : null}
         </Card>
-        <T faint size={12} style={{ textAlign: "center", marginTop: 16 }}>Only the owner account can read data. Other accounts sign in but see nothing.</T>
+        <T faint size={12} style={{ textAlign: "center", marginTop: 16 }}>{"Only the owner's email can sign in."}</T>
       </ScrollView>
     </KeyboardAvoidingView>
   );

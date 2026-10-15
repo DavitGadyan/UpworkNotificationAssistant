@@ -1,4 +1,4 @@
-# Upwork Assistant
+# Up Assistant
 
 A personal AI back office for winning high-value Upwork work.
 - The deployed app is branded **Pulse Assistant**, a neutral name that leaves Upwork's marks out.

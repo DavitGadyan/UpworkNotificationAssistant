@@ -1,11 +1,13 @@
 import { rankWithLlm } from "./agents/jobRanking";
 import { BudgetError, llmReady } from "./agents/llm";
+import { markAiRankingPaused, markAiRankingResumed } from "./aiStatus";
 import { config } from "./config";
 import {
   addJobFeed, callStats, clientHistory, getSettings, insertJob, knownJobIds, trackOutcome, kvGet, kvSet, listPendingJobs, listSearches, logNotification,
   setJobStatus, startWatch, updateJobData,
 } from "./db";
 import { callAboutJob } from "./notify/retell";
+import { currentFieldSpec } from "./ranking/fieldSpec";
 import { assessIntent } from "./ranking/intent";
 import { sendPush } from "./notify/push";
 import { sendJobAlert } from "./notify/telegram";
@@ -18,10 +20,11 @@ import { applyFeedCounts } from "./watch";
 
 /*
  * New job → JobRankingAssistant → store → notify → watch.
- *   1. cheap score from the feed row (rules only)          - every new job
+ *   1. cheap score from the feed row (rules + profile-fit gate) - every new job; off-profile ⇒ excluded
  *   2. enrichment via find_jobs get (client record)        - only promising jobs, capped per cycle
- *   3. LLM fit / value judgement                           - only jobs still above the floor, capped
- *   4. Telegram alert + proposal-count watch when the final rank clears the threshold; call for the best
+ *   3. LLM fit / value judgement                           - jobs in David's core fields, or still above the floor
+ *   4. Telegram alert + proposal-count watch when the final rank clears the threshold; call for the best.
+ *      Never on rules alone: with the AI on, a job that missed the AI check waits as "awaiting_ai".
  */
 
 export interface Notifiers {
@@ -48,8 +51,10 @@ export interface CycleBudget { enrich: number; llm: number }
 export type AlertLane = "rank" | "strong_fit";
 export const STRONG_FIT = 80;
 
-export function alertLane(score: ScoreBreakdown, telegramMin: number): AlertLane | null {
+/** `requireAi`: with the AI ranker on, nothing alerts until it has judged the job (David, 2026-10-14). */
+export function alertLane(score: ScoreBreakdown, telegramMin: number, requireAi = true): AlertLane | null {
   if (score.excluded) return null;
+  if (requireAi && !score.llm) return null;
   if (score.total >= telegramMin) return "rank";
   const red = score.rules?.flags.some((f) => f.severity === "red");
   if (score.llm && score.llm.fit >= STRONG_FIT && !red) return "strong_fit";
@@ -57,7 +62,8 @@ export function alertLane(score: ScoreBreakdown, telegramMin: number): AlertLane
 }
 
 type Opts = { now?: Date; notifiers?: Notifiers; budget?: CycleBudget; hooks?: Hooks };
-type Summary = { fresh: number; enriched: number; ranked: number; pending: number; telegram: number; calls: number };
+type Summary = { fresh: number; enriched: number; ranked: number; pending: number; awaitingAi: number; telegram: number; calls: number };
+const emptySummary = (): Summary => ({ fresh: 0, enriched: 0, ranked: 0, pending: 0, awaitingAi: 0, telegram: 0, calls: 0 });
 
 /**
  * Judge one job end to end. Client details are loaded BEFORE any LLM ranking or alert: a job whose
@@ -65,18 +71,24 @@ type Summary = { fresh: number; enriched: number; ranked: number; pending: numbe
  * so nothing is ever ranked or alerted on feed data alone. GraphQL has no detail call, so it skips this.
  */
 type Ctx = Required<Pick<Opts, "now" | "notifiers" | "budget">> & { hooks: Hooks; permHits?: number };
-async function judge(job: Job, search: SavedSearch, ctx: Ctx, summary: Summary, existing = false, prior: LlmRanking | null = null) {
+/** `stored`: the client record is already loaded (a job waiting for its AI check) - don't open the job again. */
+async function judge(job: Job, search: SavedSearch, ctx: Ctx, summary: Summary, existing = false, prior: LlmRanking | null = null, stored?: JobEnrichment | null) {
   const s = await getSettings();
   const rules = s.rules;
   const enrich = ctx.hooks.enrich ?? fetchDetail;
   const rank = ctx.hooks.rank ?? rankWithLlm;
   const now = ctx.now;
-  let score = scoreJob(job, search, now, rules);
+  const fields = await currentFieldSpec();
+  const sc = (c: Parameters<typeof scoreJob>[4] = {}) => scoreJob(job, search, now, rules, { fields, ...c });
+  let score = sc();
   let enrichment: JobEnrichment | null = null;
   let llm: LlmRanking | null = prior; // a re-judged job keeps its earlier AI verdict unless re-ranked
   let pending = false;
 
-  if (!score.excluded) {
+  if (!score.excluded && stored !== undefined) {
+    enrichment = stored;
+    score = sc({ enrichment, llm });
+  } else if (!score.excluded) {
     if (ctx.budget.enrich > 0) {
       try {
         const d = await enrich(job.id);
@@ -84,7 +96,7 @@ async function judge(job: Job, search: SavedSearch, ctx: Ctx, summary: Summary, 
         if (d) {
           enrichment = d.enrichment;
           job = mergeDetail(job, d.patch, d.enrichment);
-          score = scoreJob(job, search, now, rules, { enrichment, llm });
+          score = sc({ enrichment, llm });
           summary.enriched++;
         }
         // d === null: the source has no detail call (GraphQL) - judge on what we have.
@@ -105,19 +117,26 @@ async function judge(job: Job, search: SavedSearch, ctx: Ctx, summary: Summary, 
     } else pending = true;
   }
 
-  if (!pending && s.llm.enabled && await llmReady() && !score.excluded && score.total >= Math.max(0, s.telegramMin - 25) && ctx.budget.llm > 0) {
+  // Jobs in his core fields always get the AI check; others only while the cheap rank is near the threshold.
+  const aiOn = s.llm.enabled && await llmReady();
+  const wantsAi = !pending && !score.excluded && (score.total >= Math.max(0, s.telegramMin - 25) || score.profileFit?.verdict === "core");
+  if (wantsAi && aiOn && ctx.budget.llm > 0) {
     try {
       llm = await rank(job, enrichment, score.rules!);
       ctx.budget.llm--;
-      score = scoreJob(job, search, now, rules, { enrichment, llm, similarProject: (llm as LlmRanking & { similarProject?: boolean }).similarProject });
+      score = sc({ enrichment, llm, similarProject: llm.similarProject });
       summary.ranked++;
+      await markAiRankingResumed();
     } catch (e) {
       console.warn("llm rank failed", job.id, (e as Error).message);
-      if (e instanceof BudgetError) ctx.budget.llm = 0;
+      if (e instanceof BudgetError) {
+        ctx.budget.llm = 0;
+        await markAiRankingPaused(e.message, now);
+      }
     }
   }
 
-  if (!enrichment && llm) score = scoreJob(job, search, now, rules, { llm });
+  if (!enrichment && llm) score = sc({ llm });
   // Advisory hire-likelihood with this client's track record (jobs the assistant saw close without a hire).
   if (!score.excluded) {
     const history = await clientHistory(enrichment?.clientId);
@@ -129,10 +148,12 @@ async function judge(job: Job, search: SavedSearch, ctx: Ctx, summary: Summary, 
   if (existing) await updateJobData(job.id, { job, score, ...(enrichment ? { enrichment } : {}) });
   else { await insertJob(job, search.id, score, now.getTime(), { enrichment, feeds: [search.name] }); summary.fresh++; }
   if (pending) { await setJobStatus(job.id, "pending"); summary.pending++; return; }
+  // Missed the AI check (budget, outage, per-cycle cap): wait for it instead of alerting on rules alone.
+  if (wantsAi && aiOn && !score.llm && !score.excluded) { await setJobStatus(job.id, "awaiting_ai"); summary.awaitingAi++; return; }
   if (existing) await setJobStatus(job.id, "new");
   if (score.excluded || s.alertsPaused) return;
 
-  const lane = alertLane(score, s.telegramMin);
+  const lane = alertLane(score, s.telegramMin, aiOn);
   if (lane && ctx.notifiers.ready.telegram && s.telegramEnabled) {
     const r = await ctx.notifiers.telegram(job, score, search.name, enrichment, lane);
     await logNotification({ jobId: job.id, channel: "telegram", ok: r.ok, detail: r.detail, title: job.title, score: score.total }, now.getTime());
@@ -171,15 +192,16 @@ async function bumpAttempts(id: string): Promise<number> {
 /** New jobs from one feed: rank, store, notify. Already-known jobs only refresh their proposal counts. */
 export async function processResults(search: SavedSearch, jobs: Job[], opts: Opts = {}): Promise<Summary> {
   const ctx = { now: opts.now ?? new Date(), notifiers: opts.notifiers ?? defaultNotifiers(), budget: opts.budget ?? { enrich: Infinity, llm: Infinity }, hooks: opts.hooks ?? {} };
-  const summary: Summary = { fresh: 0, enriched: 0, ranked: 0, pending: 0, telegram: 0, calls: 0 };
+  const summary = emptySummary();
   const known = await knownJobIds(jobs.map((j) => j.id));
   const seen = jobs.filter((j) => known.has(j.id));
   for (const j of seen) await addJobFeed(j.id, search.name);
   await applyFeedCounts(seen);
   // Best first by the cheap score, so the detail/LLM budget goes to the strongest candidates.
   const rules = (await getSettings()).rules;
+  const fields = await currentFieldSpec();
   const fresh = jobs.filter((j) => !known.has(j.id))
-    .map((j) => ({ j, t: scoreJob(j, search, ctx.now, rules).total }))
+    .map((j) => ({ j, t: scoreJob(j, search, ctx.now, rules, { fields }).total }))
     .sort((a, b) => b.t - a.t);
   for (const { j } of fresh) await judge(j, search, ctx, summary);
   return summary;
@@ -188,7 +210,7 @@ export async function processResults(search: SavedSearch, jobs: Job[], opts: Opt
 /** Retry jobs parked as "pending" (client record not loaded yet). Runs before new feeds each cycle. */
 export async function retryPending(opts: Opts = {}): Promise<Summary> {
   const ctx = { now: opts.now ?? new Date(), notifiers: opts.notifiers ?? defaultNotifiers(), budget: opts.budget ?? { enrich: Infinity, llm: Infinity }, hooks: opts.hooks ?? {} };
-  const summary: Summary = { fresh: 0, enriched: 0, ranked: 0, pending: 0, telegram: 0, calls: 0 };
+  const summary = emptySummary();
   const feeds = new Map((await listSearches()).map((f) => [f.id, f]));
   for (const cj of await listPendingJobs()) {
     if (ctx.budget.enrich <= 0) break;
@@ -196,6 +218,26 @@ export async function retryPending(opts: Opts = {}): Promise<Summary> {
     if (!feed) continue;
     const { searchId: _s, searchName: _n, score: _sc, status: _st, fetchedAt: _f, enrichment: _e, feeds: _fd, ...job } = cj;
     await judge(job, feed, ctx, summary, true, cj.score.llm ?? null);
+  }
+  return summary;
+}
+
+/**
+ * Rank jobs that waited for their AI check ("awaiting_ai"): the client record is already stored, so only the
+ * AI runs. They then alert like any new job. Runs before new feeds each cycle, after pending retries.
+ */
+export async function retryAwaitingAi(opts: Opts = {}): Promise<Summary> {
+  const ctx = { now: opts.now ?? new Date(), notifiers: opts.notifiers ?? defaultNotifiers(), budget: opts.budget ?? { enrich: Infinity, llm: Infinity }, hooks: opts.hooks ?? {} };
+  const summary = emptySummary();
+  const s = await getSettings();
+  if (!s.llm.enabled || !(await llmReady())) return summary;
+  const feeds = new Map((await listSearches()).map((f) => [f.id, f]));
+  for (const cj of await listPendingJobs(30, ctx.now.getTime(), "awaiting_ai")) {
+    if (ctx.budget.llm <= 0) break;
+    const feed = feeds.get(cj.searchId);
+    if (!feed) continue;
+    const { searchId: _s, searchName: _n, score: _sc, status: _st, fetchedAt: _f, enrichment, feeds: _fd, ...job } = cj;
+    await judge(job, feed, ctx, summary, true, null, enrichment ?? null);
   }
   return summary;
 }

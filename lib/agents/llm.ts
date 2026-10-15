@@ -37,7 +37,10 @@ export interface LedgerDay { date: string; total: number; calls: number; byAgent
 export const ledgerDay = async (date: string) => await kvGet<LedgerDay>(`llm_ledger:${date}`);
 /** Several days in one query (a burst of 30 parallel reads through the transaction pooler can stall). */
 export async function ledgerDays(dates: string[]): Promise<Map<string, LedgerDay>> {
-  const rows = await query<{ key: string; value: LedgerDay }>("select key, value from private.kv where key = any($1::text[])", [dates.map((d) => `llm_ledger:${d}`)]);
+  // Lists go over the wire as JSON (see pgParam in lib/pg.ts), so unpack them in SQL.
+  const rows = await query<{ key: string; value: LedgerDay }>(
+    "select key, value from private.kv where key in (select jsonb_array_elements_text($1::text::jsonb))", [dates.map((d) => `llm_ledger:${d}`)],
+  );
   return new Map(rows.map((r) => [r.key.slice("llm_ledger:".length), r.value]));
 }
 export async function addSpend(usd: number, model = "unknown", agent = "other") {
@@ -57,7 +60,7 @@ export function costOf(model: string, u: { input_tokens?: number | null; output_
     + (u.server_tool_use?.web_search_requests ?? 0) * 0.01;
 }
 export class BudgetError extends Error {}
-/** Ranking respects the daily cap; drafts/Closer are explicit taps, so they may exceed it (they still count). */
+/** Background work (ranking, auto-drafts) respects the daily cap; explicit taps (a draft, Closer) may exceed it but still count. */
 async function checkBudget(kind: "auto" | "manual") {
   const cap = (await getSettings()).llm.dailyBudgetUsd;
   if (kind === "auto" && (await llmSpendToday()) >= cap) throw new BudgetError(`Daily LLM budget of $${cap} reached`);

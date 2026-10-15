@@ -7,6 +7,7 @@ import Animated, { useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useApiReachable } from "../lib/api";
 import { font, motion, radius, toneColors, useTheme, type Tone } from "../theme";
+import { IconClose, IconSearch } from "./icons";
 
 /* ---------- text ---------- */
 export function T({ children, style, muted, faint, size = 15, weight = "body", numberOfLines, selectable }: {
@@ -308,4 +309,25 @@ export function ProgressBar() {
 
 export function Row({ children, gap = 8, wrap, style }: { children: ReactNode; gap?: number; wrap?: boolean; style?: StyleProp<ViewStyle> }) {
   return <View style={[{ flexDirection: "row", alignItems: "center", gap, flexWrap: wrap ? "wrap" : "nowrap" }, style]}>{children}</View>;
+}
+
+/* ---------- search ---------- */
+/** Search field for a list screen; filtering happens in the screen (lists are small and already loaded). */
+export function SearchField({ value, onChangeText, placeholder }: { value: string; onChangeText: (v: string) => void; placeholder: string }) {
+  const { c } = useTheme();
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 44, paddingHorizontal: 12, borderRadius: radius.control, backgroundColor: c.track }}>
+      <IconSearch size={18} color={c.muted} />
+      <TextInput
+        value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor={c.faint} accessibilityLabel={placeholder}
+        returnKeyType="search" autoCorrect={false} autoCapitalize="none" clearButtonMode="never"
+        style={{ flex: 1, color: c.ink, fontFamily: font.body, fontSize: 15, paddingVertical: 10 }}
+      />
+      {value ? (
+        <Pressable onPress={() => onChangeText("")} hitSlop={10} accessibilityRole="button" accessibilityLabel="Clear search">
+          <IconClose size={16} color={c.muted} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
 }

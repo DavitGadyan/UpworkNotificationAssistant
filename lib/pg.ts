@@ -19,7 +19,7 @@ let current: Db | null = null;
 
 const MIGRATIONS = () => join(process.cwd(), "supabase", "migrations");
 /** Plain-Postgres migrations (no Supabase roles) - loaded into PGlite for tests. */
-export const tablesSql = () => ["001_tables.sql", "003_intent.sql", "005_actions.sql"].map((f) => readFileSync(join(MIGRATIONS(), f), "utf8")).join("\n");
+export const tablesSql = () => ["001_tables.sql", "003_intent.sql", "005_actions.sql", "007_proposal_outcomes.sql", "009_prompt_stats.sql"].map((f) => readFileSync(join(MIGRATIONS(), f), "utf8")).join("\n");
 
 function fromPostgres(url: string): Db {
   const sql = postgres(url, {
@@ -32,21 +32,36 @@ function fromPostgres(url: string): Db {
     transform: { undefined: null },
     onnotice: () => undefined,
   });
-  // A reply lost in the pooler would otherwise hang the caller (and a worker loop) forever: cancel and fail.
-  const timeoutMs = Number(process.env.DB_QUERY_TIMEOUT_MS ?? 45_000);
+  // A reply lost in the pooler leaves that connection wedged: every later query queued on it would hang too.
+  // So a query that times out fails AND retires this whole pool; the next query opens fresh connections.
+  const timeoutMs = Number(process.env.DB_QUERY_TIMEOUT_MS ?? 20_000);
+  let db: Db | null = null;
+  const retire = () => {
+    if (current !== db) return;
+    current = null;
+    console.warn("database connection stuck - reconnecting");
+    void sql.end({ timeout: 1 }).catch(() => undefined);
+  };
   const run = (s: typeof sql) => async <T>(text: string, params: unknown[] = []) => {
     const q = s.unsafe(text, params.map(pgParam) as never[]);
+    // If the timeout wins the race, q still rejects later (pool retired, DNS gone) - never leave that unhandled.
+    q.catch(() => undefined);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => { void q.cancel(); reject(new Error(`query timed out after ${timeoutMs / 1000} s: ${text.slice(0, 60)}`)); }, timeoutMs);
+      timer = setTimeout(() => {
+        void Promise.resolve().then(() => q.cancel()).catch(() => undefined);
+        retire();
+        reject(new Error(`query timed out after ${timeoutMs / 1000} s: ${text.slice(0, 60)}`));
+      }, timeoutMs);
     });
     try { return (await Promise.race([q, timeout])) as unknown as T[]; } finally { clearTimeout(timer); }
   };
-  return {
+  db = {
     query: run(sql),
     tx: (fn) => sql.begin((t) => fn(run(t as unknown as typeof sql))) as never,
     close: () => sql.end({ timeout: 5 }),
   };
+  return db;
 }
 
 /** postgres.js wants JSON as strings for ::jsonb params; numbers/strings/booleans/null pass through. */
@@ -81,8 +96,15 @@ export async function getDb(): Promise<Db> {
   return opening;
 }
 
+/** Reads are safe to repeat: one that hung (and retired the pool) is retried once on fresh connections. */
+const isRead = (text: string) => /^\s*(select|with)\b/i.test(text) && !/\b(insert|update|delete)\b/i.test(text);
 export async function query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]> {
-  return (await getDb()).query<T>(text, params);
+  try {
+    return await (await getDb()).query<T>(text, params);
+  } catch (e) {
+    if (!isRead(text) || !/query timed out/.test((e as Error).message)) throw e;
+    return (await getDb()).query<T>(text, params);
+  }
 }
 export async function one<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T | null> {
   return (await query<T>(text, params))[0] ?? null;

@@ -90,7 +90,7 @@ export default async function JobDetail({ params, searchParams }: { params: Prom
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <h1 className="display break-words text-[24px] font-bold md:text-[32px]">{job.title}</h1>
-            <span className={`pill ${toneCls[tone]}`} title="Final rank: rule score blended with the AI fit">Rank: {s.total}%</span>
+            <span className={`pill ${toneCls[tone]}`} title={llm ? "Final rank: rule score blended with the AI fit" : "Rule score only - the AI hasn't judged this job"}>Rank: {s.total}%</span>
           </div>
           <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[var(--color-muted)]">
             <span className={`pill ${pill.cls}`}>{pill.label}</span>
@@ -99,6 +99,15 @@ export default async function JobDetail({ params, searchParams }: { params: Prom
             {(job.applied || e?.applied) && <span className="pill pill-good">Applied</span>}
             <span>Posted {timeAgo(job.publishedAt)} · {job.category ?? "Uncategorised"}</span>
           </p>
+          {s.profileFit && (
+            <p className="mt-2 text-[14px]" title={s.profileFit.reasons.join(" · ")}>
+              <span className={`font-semibold ${s.profileFit.verdict === "off" ? "text-[var(--color-bad)]" : s.profileFit.verdict === "core" ? "text-[var(--color-good)]" : "text-[var(--color-muted)]"}`}>
+                {s.profileFit.verdict === "off" ? "Not your field" : s.profileFit.verdict === "core" ? "Your field" : "Unclear fit"}
+                {s.profileFit.field ? ` · ${s.profileFit.field}` : ""}
+              </span>
+              <span className="text-[var(--color-muted)]"> — {s.profileFit.reasons.join("; ")}</span>
+            </p>
+          )}
         </div>
         <JobActions id={job.id} ciphertext={job.ciphertext} status={job.status} />
       </div>
@@ -159,7 +168,13 @@ export default async function JobDetail({ params, searchParams }: { params: Prom
                     <p className="text-[13px] text-[var(--color-faint)]">Model: {llm.model}</p>
                   </div>
                 ) : (
-                  <p className="mt-3 text-[var(--color-muted)]">No AI assessment for this job. Only jobs that pass the rule checks are sent to the ranking model, up to the per-cycle limit in Settings → AI models.</p>
+                  <p className="mt-3 text-[var(--color-muted)]">
+                    {s.excluded
+                      ? `No AI assessment - the job was excluded first (${s.excluded}).`
+                      : job.status === "awaiting_ai"
+                        ? "Waiting for the AI check (daily AI budget, an outage or the per-cycle limit). Nothing is alerted until the AI has ranked it."
+                        : "No AI assessment for this job. The AI ranks jobs in your fields and jobs whose rule score is near the alert threshold; nothing is alerted without it."}
+                  </p>
                 )}
               </section>
 
@@ -195,7 +210,7 @@ export default async function JobDetail({ params, searchParams }: { params: Prom
                         { label: "Per job", value: d?.avgPerContract != null ? money(d.avgPerContract) : "—" },
                       ]} />
                     </Field>
-                    <p className="text-[13px] text-[var(--color-faint)]">Blend: rules × {settings.rules.weights.rules} + AI fit × {settings.rules.weights.llm}</p>
+                    {llm && <p className="text-[13px] text-[var(--color-faint)]">Blend: rules × {settings.rules.weights.rules} + AI fit × {settings.rules.weights.llm}</p>}
                   </div>
                 ) : (
                   <div className="mt-4 grid gap-4 md:grid-cols-2">

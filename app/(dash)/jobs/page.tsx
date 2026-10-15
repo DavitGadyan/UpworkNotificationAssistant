@@ -6,34 +6,48 @@ import { JobsFilterBar } from "@/components/JobsFilterBar";
 import { PageHead } from "@/components/ui/PageHead";
 import { UpworkLink } from "@/components/UpworkLink";
 import { ClaudeFetchButton } from "@/components/ClaudeFetchButton";
+import { DateRangePicker } from "@/components/DateRangePicker";
+import { ScoreRange } from "@/components/ScoreRange";
+import { SearchBox } from "@/components/SearchBox";
 import { Pagination } from "@/components/ui/Pagination";
 import { jobPill } from "@/components/ui/status";
 import { getSettings, listJobs, listSearches } from "@/lib/db";
 import { budgetLabel, compactMoney, INTENT_LABELS, intentPill, proposalsLabel, timeAgo } from "@/lib/format";
+import { dateWindow, scoreWindow } from "@/lib/jobFilters";
 import type { JobStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Jobs" };
 
 const PER_PAGE = 15;
-type SP = Promise<{ q?: string; search?: string; status?: string; min?: string; page?: string; filters?: string }>;
+type SP = Promise<{ q?: string; search?: string; status?: string; min?: string; max?: string; range?: string; since?: string; until?: string; page?: string; filters?: string }>;
+/** Params "Clear filters" removes: date and score go back to the last 24 hours and 0–100. */
+const CLEARED = ["filters", "search", "status", "min", "max", "range", "since", "until", "page"];
 
 export default async function Jobs({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
   const settings = await getSettings();
   const searches = await listSearches();
+  const score = scoreWindow(sp);
+  const when = dateWindow(sp);
+  // Jobs outside his fields only show under Filter → Status → "Not my field".
+  const offOnly = sp.status === "off";
   const all = await listJobs({
-    status: (sp.status as JobStatus) || "all",
+    status: offOnly ? "all" : (sp.status as JobStatus) || "all",
+    offProfile: offOnly ? "only" : "hide",
     searchId: sp.search ? Number(sp.search) : undefined,
     q: sp.q,
-    minScore: sp.min ? Number(sp.min) : undefined,
+    minScore: score.min,
+    maxScore: score.max,
+    since: when.since,
+    until: when.until,
   });
   const pages = Math.max(1, Math.ceil(all.length / PER_PAGE));
   const page = Math.min(pages, Math.max(1, Number(sp.page) || 1));
   const jobs = all.slice((page - 1) * PER_PAGE, page * PER_PAGE);
-  const filtersOpen = !!(sp.filters || sp.search || sp.status || sp.min);
+  const filtersOpen = !!(sp.filters || sp.search || sp.status);
   const filterHref = (() => {
-    const q = new URLSearchParams(Object.entries(sp).filter(([k, v]) => v && !["filters", "search", "status", "min", "page"].includes(k)) as [string, string][]);
+    const q = new URLSearchParams(Object.entries(sp).filter(([k, v]) => v && (filtersOpen ? !CLEARED.includes(k) : k !== "page")) as [string, string][]);
     if (!filtersOpen) q.set("filters", "1");
     return `/jobs${q.size ? `?${q}` : ""}`;
   })();
@@ -47,7 +61,7 @@ export default async function Jobs({ searchParams }: { searchParams: SP }) {
     <>
       <PageHead
         title="Jobs"
-        subtitle={sp.q ? `Results for “${sp.q}” in the last 24 hours.` : "New jobs from the last 24 hours, newest first. Anything older is deleted automatically."}
+        subtitle={sp.q ? `Results for “${sp.q}”.` : "Newest first, filtered by posting date and score. Jobs you don't act on are deleted after 24 hours."}
         meta={<Link href="/ranking" className="font-medium text-[var(--color-accent)] underline-offset-4 hover:underline">How ranking works →</Link>}
         actions={<>
           <Link href={filterHref} className="btn" aria-pressed={filtersOpen} aria-controls="job-filters" scroll={false}>
@@ -58,13 +72,19 @@ export default async function Jobs({ searchParams }: { searchParams: SP }) {
         </>}
       />
 
+      <SearchBox placeholder="Search jobs: title, skills or description" className="mb-3" />
+      <div className={`${filtersOpen ? "mb-3" : "mb-5"} flex flex-col gap-3 md:flex-row md:items-center`}>
+        <DateRangePicker preset={when.preset} since={when.preset ? null : when.since} until={when.preset ? null : when.until} />
+        <ScoreRange min={score.min} max={score.max} />
+        <p className="num shrink-0 text-[14px] text-[var(--color-muted)] md:w-[72px] md:text-right" aria-live="polite">{all.length} job{all.length === 1 ? "" : "s"}</p>
+      </div>
       {filtersOpen && <JobsFilterBar searches={searches.map((s) => ({ value: String(s.id), label: s.name }))} />}
 
       {jobs.length === 0 ? (
         <div className="card px-6 py-16 text-center">
-          <h2 className="display text-[22px] font-semibold">No jobs here yet</h2>
+          <h2 className="display text-[22px] font-semibold">No jobs match</h2>
           <p className="mx-auto mt-2 max-w-md text-[var(--color-muted)]">
-            {searches.length ? "New jobs appear after the next poll. Try clearing filters if you expected results." : "Create a saved search first, then jobs show up here."}
+            {searches.length ? "Widen the posting date or the score range, or wait for the next poll." : "Create a saved search first, then jobs show up here."}
           </p>
         </div>
       ) : (

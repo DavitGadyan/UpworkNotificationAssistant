@@ -1,6 +1,6 @@
 {
-  "name": "Upwork Assistant",
-  "short_name": "Upwork Asst",
+  "name": "Up Assistant",
+  "short_name": "Up Assistant",
   "description": "Personal job alert and proposal assistant.",
   "id": "/",
   "start_url": "/",

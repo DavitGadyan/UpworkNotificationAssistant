@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit",
     "worker:once": "tsx --env-file=.env worker/index.ts --once --dry-run",
     "mcp:login": "tsx --env-file=.env scripts/mcp-login.ts",
-    "distill:playbook": "tsx --env-file=.env scripts/distill-playbook.ts"
+    "distill:playbook": "tsx --env-file=.env scripts/distill-playbook.ts",
+    "docs": "tsx --env-file=.env scripts/build-docs.ts",
+    "migrate": "tsx --env-file=.env scripts/migrate.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",

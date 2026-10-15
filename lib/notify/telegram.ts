@@ -4,13 +4,21 @@ import type { Job, JobEnrichment, ScoreBreakdown } from "../types";
 
 export interface SendResult { ok: boolean; detail: string; messageId?: number }
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+export const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+export const telegramConfigured = () => !!(config.telegram.botToken && config.telegram.chatId);
 const badge = (n: number) => (n >= 85 ? "🟢" : n >= 70 ? "🟡" : "🟠");
 
 /**
  * Channel post for one job. The job link is Upwork's universal link (https://www.upwork.com/jobs/~02…),
  * which the Upwork mobile app claims on iOS/Android, so tapping it opens the job in the app.
  */
+/** Which of David's fields the job is, and the AI's fit - relevance at a glance. */
+function fieldLine(score: ScoreBreakdown): string {
+  const field = score.llm?.field || score.profileFit?.field;
+  if (!field && !score.llm) return "";
+  return `🧭 ${field ? `Your field: <b>${esc(field)}</b>` : "Field unclear"}${score.llm ? ` · AI fit ${score.llm.fit}/100` : ""}`;
+}
+
 export function formatJobMessage(job: Job, score: ScoreBreakdown, feedName: string, e?: JobEnrichment | null, proposalsNow?: string, lane: "rank" | "strong_fit" = "rank"): string {
   const c = job.client;
   const llm = score.llm;
@@ -38,6 +46,7 @@ export function formatJobMessage(job: Job, score: ScoreBreakdown, feedName: stri
       ? `💡 <b>Strong fit, weak signals</b> · AI fit ${llm?.fit ?? "?"}/100 · rank ${score.total} · ${esc(feedName)}`
       : `${badge(score.total)} <b>${score.total}/100</b> · ${esc(llm?.category ?? r?.category ?? "")} · ${esc(feedName)}`,
     `<a href="${link}"><b>${esc(job.title)}</b></a>`,
+    fieldLine(score),
     intentLine,
     llm?.summary ? esc(llm.summary) : "",
     llm?.finalProduct ? `🎯 <b>Final product:</b> ${esc(llm.finalProduct)}` : "",

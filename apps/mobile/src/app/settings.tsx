@@ -17,6 +17,8 @@ type Form = {
   autoMinRank: string;
   autoDailyCap: string;
   budget: string;
+  alsoMine: string;
+  never: string;
 };
 
 function SwitchRow({ label, sub, value, onChange }: { label: string; sub?: string; value: boolean; onChange: (v: boolean) => void }) {
@@ -29,6 +31,8 @@ function SwitchRow({ label, sub, value, onChange }: { label: string; sub?: strin
   );
 }
 
+/** Comma/newline-separated phrases → a clean list (same limits as the web's validator). */
+const phrases = (s: string) => [...new Set(s.split(/[,\n]/).map((x) => x.trim()).filter((x) => x.length > 1 && x.length <= 60))].slice(0, 100);
 const int = (s: string, min: number, max: number) => { const n = Math.round(Number(s)); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : null; };
 
 const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
@@ -56,6 +60,8 @@ export default function SettingsScreen() {
       autoMinRank: String(d.autoDraft?.minRank ?? 85),
       autoDailyCap: String(d.autoDraft?.dailyCap ?? 3),
       budget: String(d.llm?.dailyBudgetUsd ?? 5),
+      alsoMine: (d.profileFit?.alsoMine ?? []).join(", "),
+      never: (d.profileFit?.never ?? []).join(", "),
     });
   }
 
@@ -77,6 +83,7 @@ export default function SettingsScreen() {
         pollIntervalSec: poll * 60,
         autoDraft: { enabled: form.autoEnabled, minRank, dailyCap: cap },
         llm: { dailyBudgetUsd: Math.round(budget * 100) / 100 },
+        profileFit: { alsoMine: phrases(form.alsoMine), never: phrases(form.never) },
       });
       haptic.success();
       setMsg({ tone: "good", text: "Saved. The worker picks this up on its next cycle." });
@@ -121,7 +128,14 @@ export default function SettingsScreen() {
 
           <SectionTitle>AI budget</SectionTitle>
           <Card style={{ marginBottom: 16 }}>
-            <Field label="Daily budget (USD)" value={form.budget} onChangeText={(t) => set("budget", t.replace(/[^0-9.]/g, ""))} keyboardType="decimal-pad" hint="Ranking and drafting stop for the day once spend reaches this" />
+            <Field label="Daily budget (USD)" value={form.budget} onChangeText={(t) => set("budget", t.replace(/[^0-9.]/g, ""))} keyboardType="decimal-pad" hint="Ranking and auto-drafts stop for the day at this amount; new jobs then wait for the AI check - nothing alerts on rules alone" />
+          </Card>
+
+          <SectionTitle>Your fields</SectionTitle>
+          <Card style={{ marginBottom: 16 }}>
+            <T muted size={13} style={{ marginBottom: 10 }}>Jobs outside your fields are marked “Not your field”: no AI check, no alert, no draft. Built in: AI agents, ML/CV, data, trading, voice agents &amp; automation, AI marketing &amp; ads, AI video, web &amp; app dev, blockchain, cloud - plus your Upwork profile skills.</T>
+            <Field label="Also my work" value={form.alsoMine} onChangeText={(t) => set("alsoMine", t)} placeholder="e.g. Shopify app, Chrome extension" autoCapitalize="none" multiline hint="Comma-separated skills or title words" />
+            <Field label="Never my work" value={form.never} onChangeText={(t) => set("never", t)} placeholder="e.g. WordPress theme, Salesforce admin" autoCapitalize="none" multiline hint="Comma-separated skills or title words" />
           </Card>
 
           {msg ? <Banner tone={msg.tone}>{msg.text}</Banner> : null}

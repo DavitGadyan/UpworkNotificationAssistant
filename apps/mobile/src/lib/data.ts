@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as demo from "../demo";
-import type {
-  CachedJob, FeedRow, JobRow, NotificationDbRow, Proposal, ProposalRow, ReportKind, ReportRow, Settings, SnapshotRow, WatchRow,
+import type { PromptStatRow,
+  LessonsDecision, ProposalOutcomeRow, CachedJob, FeedRow, JobRow, NotificationDbRow, Proposal, ProposalRow, ReportKind, ReportRow, Settings, SnapshotRow, WatchRow,
 } from "../types";
 import { config } from "./config";
 import { supabase } from "./supabase";
@@ -117,6 +117,25 @@ export async function fetchLatestReport<T>(kind: ReportKind): Promise<ReportRow<
   if (config.demo) return (demo.demoReports.find((r) => r.kind === kind) as ReportRow<T> | undefined) ?? null;
   const rows = check(await supabase.from("reports").select("*").eq("kind", kind).order("id", { ascending: false }).limit(1)) as ReportRow<T>[];
   return rows[0] ?? null;
+}
+
+export async function fetchProposalOutcomes(limit = 60): Promise<ProposalOutcomeRow[]> {
+  if (config.demo) return [];
+  return check(await supabase.from("proposal_outcomes")
+    .select("upwork_proposal_id,job_id,job_title,submitted_at,status,viewed,boosted,bid_label,first_reply,outcome,insights,job")
+    .order("submitted_at", { ascending: false }).limit(limit)) as ProposalOutcomeRow[];
+}
+
+export async function fetchLessonsDecisions(): Promise<LessonsDecision[]> {
+  if (config.demo) return [];
+  return (check(await supabase.from("reports").select("data").eq("kind", "lessons_decision").order("id", { ascending: false }).limit(20)) as { data: LessonsDecision }[]).map((r) => r.data);
+}
+
+export async function fetchPromptStats(prompt: "proposal" | "job_ranking", version?: number): Promise<PromptStatRow[]> {
+  if (config.demo) return [];
+  let q = supabase.from("prompt_stats").select("day,prompt,version,scenario,sent,viewed,replied,offers,hires").eq("prompt", prompt).eq("scenario", "all");
+  if (version != null) q = q.eq("version", version);
+  return check(await q.order("day", { ascending: true }).limit(500)) as PromptStatRow[];
 }
 
 // ---------- writes (the only ones RLS allows) ----------

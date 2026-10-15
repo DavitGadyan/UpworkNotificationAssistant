@@ -230,6 +230,31 @@
   .input:hover { border-color: color-mix(in srgb, var(--color-ink) 25%, var(--color-line)); }
   .input:focus-visible { outline: 2px solid var(--color-ink); outline-offset: 0; border-color: transparent; }
 
+  /* Min–max slider: two overlaid range inputs; only their thumbs take the pointer. --lo/--hi are 0–1. */
+  .range-dual { --thumb: 22px; }
+  .range-dual::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 6px; transform: translateY(-50%); border-radius: 999px;
+    background: linear-gradient(to right,
+      var(--color-control) calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--lo)),
+      var(--color-accent) calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--lo)),
+      var(--color-accent) calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--hi)),
+      var(--color-control) calc(var(--thumb) / 2 + (100% - var(--thumb)) * var(--hi)));
+  }
+  .range-dual input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; background: transparent; pointer-events: none; -webkit-appearance: none; appearance: none; }
+  .range-dual input::-webkit-slider-runnable-track { height: 100%; background: transparent; }
+  .range-dual input::-moz-range-track { background: transparent; }
+  .range-dual input::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; pointer-events: auto; box-sizing: border-box; width: var(--thumb); height: var(--thumb);
+    margin-top: calc((24px - var(--thumb)) / 2); border-radius: 50%; border: 2px solid var(--color-ink); background: var(--color-surface); box-shadow: var(--shadow-chip); cursor: grab;
+  }
+  .range-dual input::-moz-range-thumb {
+    pointer-events: auto; box-sizing: border-box; width: var(--thumb); height: var(--thumb);
+    border-radius: 50%; border: 2px solid var(--color-ink); background: var(--color-surface); box-shadow: var(--shadow-chip); cursor: grab;
+  }
+  .range-dual input:active::-webkit-slider-thumb { cursor: grabbing; }
+  .range-dual input:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--color-ink); outline-offset: 2px; }
+  .range-dual input:focus-visible::-moz-range-thumb { outline: 2px solid var(--color-ink); outline-offset: 2px; }
+
   .divide-row > * + * { border-top: 1px solid var(--color-line); }
   .stat-label { color: var(--color-muted); }
   .num { font-variant-numeric: tabular-nums; }

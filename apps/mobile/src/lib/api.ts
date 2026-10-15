@@ -120,8 +120,8 @@ export const endpoints = {
     api<CloserAdvice>("/api/closer", { method: "POST", body, timeoutMs: 200_000 }),
   closerInbox: () => api<CloserInboxResponse>("/api/closer?inbox=1", { timeoutMs: 60_000 }),
   fetchViaClaude: () => api<{ ok?: boolean; message?: string }>("/api/fetch/claude", { method: "POST", body: {}, timeoutMs: 300_000 }),
-  insights: (action: "snapshot" | "review" | "coach" | "icp" | "calibrate" | "apply-calibration" | "ghosts") =>
-    api<unknown>(`/api/insights/${action}`, { method: "POST", body: {}, timeoutMs: 300_000 }),
+  insights: (action: "snapshot" | "review" | "coach" | "icp" | "calibrate" | "apply-calibration" | "ghosts" | "outcomes" | "lessons" | "approve-lessons" | "reject-lessons" | "lab" | "lab-refresh", body: Record<string, unknown> = {}) =>
+    api<unknown>(`/api/insights/${action}`, { method: "POST", body, timeoutMs: 300_000 }),
 };
 
 // ---------- demo ----------

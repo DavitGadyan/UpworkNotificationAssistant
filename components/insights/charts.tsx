@@ -148,3 +148,53 @@ export function DataTable({ head, rows }: { head: string[]; rows: (string | numb
     </div>
   );
 }
+
+const SERIES = ["var(--color-accent)", "var(--color-good)", "var(--color-warn)", "var(--color-info, var(--color-ink))", "var(--color-muted)"];
+
+/** Rate (%) per day for a few series (one per prompt version). 2px lines, markers with tooltips, legend + table view. */
+export function TrendChart({ series, unit = "%", title }: { series: { label: string; points: { day: string; value: number | null }[] }[]; unit?: string; title: string }) {
+  const days = [...new Set(series.flatMap((s) => s.points.map((p) => p.day)))].sort();
+  const H = 190, padL = 36, padR = 12, padT = 16, padB = 26, W = 600;
+  const vals = series.flatMap((s) => s.points.map((p) => p.value)).filter((v): v is number => v != null);
+  const max = Math.max(10, Math.ceil(Math.max(0, ...vals) / 10) * 10);
+  const n = days.length;
+  const x = (d: string) => { const i = days.indexOf(d); return padL + (n <= 1 ? (W - padL - padR) / 2 : (i / (n - 1)) * (W - padL - padR)); };
+  const y = (v: number) => padT + (H - padT - padB) * (1 - v / max);
+  const dayLabel = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  if (!n) return <p className="text-[14px] text-[var(--color-muted)]">No daily snapshots yet - the first one is taken after the next reply check.</p>;
+  return (
+    <figure className="m-0">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-[var(--color-muted)]" aria-hidden>
+        {series.map((s, i) => <span key={s.label} className="inline-flex items-center gap-1.5"><span className="h-0.5 w-4 rounded" style={{ background: SERIES[i % SERIES.length] }} />{s.label}</span>)}
+      </div>
+      <svg role="img" viewBox={`0 0 ${W} ${H}`} className="mt-2 block h-auto w-full" aria-label={title}>
+        <title>{title}</title>
+        {[0, max / 2, max].map((t) => (
+          <g key={t}>
+            <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} stroke="var(--color-line)" strokeWidth="1" />
+            <text x={padL - 6} y={y(t) + 4} textAnchor="end" fontSize="11" fill="var(--color-faint)">{t}{unit}</text>
+          </g>
+        ))}
+        {series.map((s, i) => {
+          const pts = s.points.filter((p) => p.value != null).sort((a, b) => a.day.localeCompare(b.day));
+          const c = SERIES[i % SERIES.length];
+          return (
+            <g key={s.label}>
+              {pts.length > 1 && <path d={pts.map((p, j) => `${j ? "L" : "M"}${x(p.day)},${y(p.value!)}`).join(" ")} fill="none" stroke={c} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />}
+              {pts.map((p) => (
+                <g key={p.day}><title>{`${s.label} · ${dayLabel(p.day)}: ${p.value}${unit}`}</title><circle cx={x(p.day)} cy={y(p.value!)} r="3.5" fill={c} stroke="var(--color-surface)" strokeWidth="1.5" /></g>
+              ))}
+            </g>
+          );
+        })}
+        {days.map((d, i) => (n <= 8 || i % Math.ceil(n / 8) === 0 || i === n - 1) && (
+          <text key={d} x={x(d)} y={H - 8} textAnchor="middle" fontSize="12" fill="var(--color-muted)">{dayLabel(d)}</text>
+        ))}
+      </svg>
+      <details className="mt-2">
+        <summary className="cursor-pointer text-[13px] text-[var(--color-muted)]">Table view</summary>
+        <DataTable head={["Day", ...series.map((s) => s.label)]} rows={days.map((d) => [d, ...series.map((s) => { const v = s.points.find((p) => p.day === d)?.value; return v == null ? "-" : `${v}${unit}`; })])} />
+      </details>
+    </figure>
+  );
+}

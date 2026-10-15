@@ -31,6 +31,11 @@ export const IconChart = ({ size = 20, color, cut = "#FFFFFF" }: P) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}><Rect x="3" y="12" width="4.5" height="9" rx="2"/><Rect x="9.75" y="7" width="4.5" height="14" rx="2"/><Rect x="16.5" y="3" width="4.5" height="18" rx="2"/></Svg>
 );
 
+/** Flask: the prompt lab - prompt versions tested against each other (A/B). */
+export const IconFlask = ({ size = 20, color, cut = "#FFFFFF" }: P) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}><Path d="M9 2h6a1 1 0 1 1 0 2h-.5v4.6l5.9 9.9A2.3 2.3 0 0 1 18.4 22H5.6a2.3 2.3 0 0 1-2-3.5l5.9-9.9V4H9a1 1 0 0 1 0-2Z" opacity=".55"/><Path d="M7.1 14h9.8l3.5 5.8a1.5 1.5 0 0 1-1.3 2.2H5a1.5 1.5 0 0 1-1.3-2.2L7.1 14Z"/><Circle cx="10" cy="18.2" r="1.1" fill={cut}/><Circle cx="13.6" cy="16.6" r=".8" fill={cut}/></Svg>
+);
+
 export const IconFeed = ({ size = 20, color, cut = "#FFFFFF" }: P) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}><Circle cx="5.5" cy="18.5" r="2.5"/><Path d="M3 10.5a1.5 1.5 0 0 1 1.5-1.5A10.5 10.5 0 0 1 15 19.5a1.5 1.5 0 0 1-3 0A7.5 7.5 0 0 0 4.5 12 1.5 1.5 0 0 1 3 10.5Z"/><Path d="M3 4.5A1.5 1.5 0 0 1 4.5 3 16.5 16.5 0 0 1 21 19.5a1.5 1.5 0 0 1-3 0A13.5 13.5 0 0 0 4.5 6 1.5 1.5 0 0 1 3 4.5Z" opacity=".55"/></Svg>
 );
@@ -73,6 +78,14 @@ export const IconRefresh = ({ size = 20, color, cut = "#FFFFFF" }: P) => (
 
 export const IconSpark = ({ size = 20, color, cut = "#FFFFFF" }: P) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}><Path d="M11 2.5c.3 0 .6.2.7.5l1.4 4.1a5 5 0 0 0 3.2 3.2l4.1 1.4a.75.75 0 0 1 0 1.4l-4.1 1.4a5 5 0 0 0-3.2 3.2l-1.4 4.1a.75.75 0 0 1-1.4 0l-1.4-4.1a5 5 0 0 0-3.2-3.2L1.6 13.1a.75.75 0 0 1 0-1.4l4.1-1.4a5 5 0 0 0 3.2-3.2L10.3 3c.1-.3.4-.5.7-.5Z"/><Path d="M19 1.5l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6.6-1.6Z" opacity=".55"/></Svg>
+);
+
+export const IconChevronLeft = ({ size = 20, color }: P) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill={"none"} stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><Path d="m15 6-6 6 6 6"/></Svg>
+);
+
+export const IconCalendar = ({ size = 20, color, cut = "#FFFFFF" }: P) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill={color}><Rect x="7" y="2" width="2" height="4.5" rx="1"/><Rect x="15" y="2" width="2" height="4.5" rx="1"/><Path d="M3 8a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v1H3V8Z" opacity=".55"/><Path d="M3 10.5h18V18a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4v-7.5Z"/><Rect x="6.5" y="13.5" width="3.5" height="3.5" rx="1.2" fill={cut}/></Svg>
 );
 
 export const IconChevronRight = ({ size = 20, color, cut = "#FFFFFF" }: P) => (

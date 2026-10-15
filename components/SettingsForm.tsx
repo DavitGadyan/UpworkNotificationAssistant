@@ -32,6 +32,10 @@ export function SettingsForm({ initial, timezones, configured }: {
   const [busy, setBusy] = useState<string | null>(null);
 
   const [countries, setCountries] = useState(initial.rules.excludedCountries.join(", "));
+  const pf0 = (initial as Settings & { profileFit?: Settings["profileFit"] }).profileFit ?? { never: [], alsoMine: [] };
+  const [neverList, setNeverList] = useState(pf0.never.join(", "));
+  const [mineList, setMineList] = useState(pf0.alsoMine.join(", "));
+  const splitList = (v: string) => v.split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
   const r = s.rules;
   const setRules = (patch: Partial<RankingRules>) => setS({ ...s, rules: { ...r, ...patch } });
   const llm = s.llm as LlmSettings;
@@ -44,13 +48,17 @@ export function SettingsForm({ initial, timezones, configured }: {
     e.preventDefault();
     if (modelErr) { setError("Model ids must look like claude-…"); return; }
     setBusy("save"); setError(null);
-    const body = { ...s, rules: { ...r, excludedCountries: countries.split(",").map((c) => c.trim()).filter(Boolean) } };
+    const body = {
+      ...s, rules: { ...r, excludedCountries: countries.split(",").map((c) => c.trim()).filter(Boolean) },
+      profileFit: { never: splitList(neverList), alsoMine: splitList(mineList) },
+    };
     const res = await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     setBusy(null);
     if (!res.ok) { setError(((await res.json()) as { error: string }).error); return; }
     const next = (await res.json()) as Settings;
     setS(next);
     setCountries(next.rules.excludedCountries.join(", "));
+    if (next.profileFit) { setNeverList(next.profileFit.never.join(", ")); setMineList(next.profileFit.alsoMine.join(", ")); }
     setSaved(true); setTimeout(() => setSaved(false), 2500);
     router.refresh();
   };
@@ -226,6 +234,23 @@ export function SettingsForm({ initial, timezones, configured }: {
               value={llm.prepaidCreditUsd ?? ""} onChange={(e) => setLlm({ prepaidCreditUsd: e.target.value === "" ? null : Number(e.target.value) })} />
           </label>
           <p className="text-[14px] text-[var(--color-muted)]">Spent today: <LlmSpend budget={llm.dailyBudgetUsd ?? 1} fallback="not reported yet" />{llm.creditSetAt ? ` · credit counted since ${llm.creditSetAt.slice(0, 10)}` : ""}</p>
+        </div>
+      </section>
+
+      {/* Your fields (profile-fit gate) */}
+      <section className="card min-w-0 p-5 md:p-6 lg:col-span-2" aria-labelledby="fields">
+        <h2 id="fields" className="display text-[20px] font-semibold">Your fields</h2>
+        <p className="mt-1 text-[14px] text-[var(--color-muted)]">
+          Jobs outside your fields are marked “Not your field”: rank 0, no AI check, no alert, no draft, hidden unless you filter for them.
+          Built in: AI agents &amp; LLM apps, ML/CV/NLP, data science &amp; engineering, algorithmic trading, voice agents &amp; automation, AI marketing &amp; ads,
+          AI video/image generation, web &amp; app development, blockchain, cloud/DevOps, plus the skills on your Upwork profile. Never: game dev, legal,
+          admin/VA, customer service, non-technical writing &amp; editing, non-AI design and video editing, sales/PR roles, accounting &amp; tax, CAD, IT helpdesk.
+        </p>
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <label className="field"><span>Also my work (comma-separated skills or title words)</span>
+            <textarea className="input min-h-[72px] py-2.5" value={mineList} onChange={(e) => setMineList(e.target.value)} placeholder="e.g. Shopify app, Chrome extension" /></label>
+          <label className="field"><span>Never my work (comma-separated skills or title words)</span>
+            <textarea className="input min-h-[72px] py-2.5" value={neverList} onChange={(e) => setNeverList(e.target.value)} placeholder="e.g. WordPress theme, Salesforce admin" /></label>
         </div>
       </section>
 

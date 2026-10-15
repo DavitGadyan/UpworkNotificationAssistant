@@ -1,7 +1,7 @@
 import { router, type Href } from "expo-router";
 import type { ReactNode } from "react";
 import { Alert, View } from "react-native";
-import { IconChart, IconChevronRight, IconEye, IconFeed, IconSettings, IconUser } from "../../components/icons";
+import { IconChart, IconChevronRight, IconFlask, IconEye, IconFeed, IconSettings, IconUser } from "../../components/icons";
 import { Card, Divider, PressableScale, Row, Screen, T } from "../../components/ui";
 import { useAuth } from "../../lib/auth";
 import { config } from "../../lib/config";
@@ -29,6 +29,7 @@ export default function More() {
         <Item icon={<IconEye size={20} color={c.ink} />} label="Watchlist" sub="Competition on jobs you were alerted to" href="/watchlist" />
         <Divider />
         <Item icon={<IconChart size={20} color={c.ink} />} label="Insights" sub="Funnel, win rate and coaching reports" href="/insights" />
+        <Item icon={<IconFlask size={20} color={c.ink} cut={c.control} />} label="Prompt analytics" sub="Reply, offer and hire rate per prompt version" href="/prompts" />
         <Divider />
         <Item icon={<IconFeed size={20} color={c.ink} />} label="Feeds" sub="What gets polled" href="/feeds" />
         <Divider />
@@ -45,7 +46,7 @@ export default function More() {
           </View>
         </PressableScale>
       </Card>
-      <T faint size={12} style={{ textAlign: "center", marginTop: 16 }}>Upwork Assistant 1.0.0</T>
+      <T faint size={12} style={{ textAlign: "center", marginTop: 16 }}>Up Assistant 1.0.0</T>
     </Screen>
   );
 }

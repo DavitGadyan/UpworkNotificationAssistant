@@ -3,7 +3,9 @@ import { getSettings, kvGet, kvSet, listFeedback, listJobs, listProposals, listS
 import { structured } from "../agents/llm";
 import { catalogue, profileDigest, saveUpworkProfile, upworkProfile } from "../agents/profile";
 import { getPrompt } from "../agents/prompts";
+import { resetFieldSpecCache } from "../ranking/fieldSpec";
 import { callTool, resolveClientOrg } from "../upwork/mcp/client";
+import { parseProposalList, type UpworkProposalRow } from "../upwork/mcp/proposals";
 import { parseServiceFees } from "./icp";
 
 /*
@@ -21,19 +23,23 @@ const pick = (o: Obj | undefined, ...keys: string[]) => { for (const k of keys) 
 
 export async function syncProfile() {
   const r = await callTool<Obj>("get_profile", "get");
-  const p: Obj = r.profile ?? r.data?.talentProfileByProfileKey ?? r.data?.profile ?? r;
+  // MCP returns { data: { personalData: { title, description, chargeRate }, skills: [{ prettyName }], profileAggregates } }.
+  const p: Obj = r.profile ?? r.data?.talentProfileByProfileKey ?? r.data?.profile ?? r.data ?? r;
+  const pd: Obj = p.personalData ?? p;
+  const agg: Obj = p.profileAggregates ?? p;
   const skills = (pick(p, "skills", "skillset") as Obj[] | string[] | undefined) ?? [];
   await saveUpworkProfile({
     fetchedAt: new Date().toISOString(),
-    title: pick(p, "title", "professionalTitle") ?? null,
-    overview: pick(p, "overview", "description", "summary") ?? null,
-    hourlyRate: Number(String(pick(p, "hourly_rate", "hourlyRate", "rate") ?? "").replace(/[^0-9.]/g, "")) || null,
-    jss: Number(pick(p, "job_success_score", "jobSuccessScore", "jss")) || null,
-    totalEarnings: (pick(p, "total_earnings", "totalEarnings") as string | undefined) ?? null,
-    badges: [pick(p, "top_rated_label", "badge"), pick(p, "expert_vetted_label")].filter(Boolean) as string[],
-    skills: skills.map((s) => (typeof s === "string" ? s : s.name ?? s.prettyName ?? "")).filter(Boolean),
-    raw: p,
+    title: pick(pd, "title", "professionalTitle") ?? null,
+    overview: pick(pd, "description", "overview", "summary") ?? null,
+    hourlyRate: Number(String(pick(pd.chargeRate ?? {}, "rawValue", "amount") ?? pick(p, "hourly_rate", "hourlyRate", "rate") ?? "").replace(/[^0-9.]/g, "")) || null,
+    jss: Number(pick(agg, "job_success_score", "jobSuccessScore", "jss")) || null,
+    totalEarnings: (pick(agg, "totalEarnings", "total_earnings") as string | undefined) ?? null,
+    badges: [pick(agg, "top_rated", "top_rated_label", "badge"), pick(p, "expert_vetted_label")].filter(Boolean) as string[],
+    skills: skills.map((s) => (typeof s === "string" ? s : s.prettyName ?? s.name ?? s.skill ?? "")).filter(Boolean),
+    raw: r,
   });
+  resetFieldSpecCache(); // his profile skills feed the profile-fit gate
   return await upworkProfile();
 }
 
@@ -51,20 +57,18 @@ export interface MonthMetrics {
 }
 
 /** Proposal rows created inside [from, to) for one status (pages until older than `from`). */
-async function proposalsIn(status: string, from: string, to: string): Promise<Obj[]> {
-  const out: Obj[] = [];
-  let cursor: string | undefined;
+async function proposalsIn(status: string, from: string, to: string): Promise<UpworkProposalRow[]> {
+  const out: UpworkProposalRow[] = [];
+  let cursor: string | null = null;
   for (let page = 0; page < 6; page++) {
-    const r = await callTool<Obj>("list_freelancer_proposals", "list", { status, limit: 10, sort_field: "CREATEDDATETIME", sort_order: "DESC", ...(cursor ? { cursor } : {}) });
-    const rows: Obj[] = r.proposals ?? r.data?.proposals ?? r.items ?? [];
+    const r = parseProposalList(await callTool<Obj>("list_freelancer_proposals", "list", { status, limit: 10, sort_field: "CREATEDDATETIME", sort_order: "DESC", ...(cursor ? { cursor } : {}) }));
     let older = false;
-    for (const p of rows) {
-      const created = String(pick(p, "createdDateTime", "created", "created_date") ?? "");
-      if (created && created < from) { older = true; continue; }
-      if (!created || created < to) out.push(p);
+    for (const p of r.rows) {
+      if (p.createdAt < from) { older = true; continue; }
+      if (p.createdAt < to) out.push(p);
     }
-    cursor = r.pageInfo?.endCursor ?? r.next_cursor;
-    if (older || !cursor || !(r.pageInfo?.hasNextPage ?? r.hasMore)) break;
+    cursor = r.cursor;
+    if (older || !cursor || !r.hasMore) break;
   }
   return out;
 }
@@ -76,7 +80,7 @@ export async function monthlySnapshot(period?: string): Promise<MonthMetrics> {
   const [y, m] = p.split("-").map(Number);
   const to = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
 
-  const byStatus: Record<string, Obj[]> = {};
+  const byStatus: Record<string, UpworkProposalRow[]> = {};
   for (const st of STATUSES) byStatus[st] = await proposalsIn(st, from, to).catch(() => []);
   const all = Object.values(byStatus).flat();
   const inv = await callTool<Obj>("list_freelancer_proposals", "invitations", { status: "pending", limit: 10 }).catch(() => ({}) as Obj);
@@ -97,7 +101,7 @@ export async function monthlySnapshot(period?: string): Promise<MonthMetrics> {
     period: p,
     proposals: {
       sent: all.length,
-      viewed: all.filter((x) => x.viewedByClient || x.viewed_by_client).length,
+      viewed: all.filter((x) => x.viewed).length,
       offers: byStatus.Offered.length,
       hired: byStatus.Hired.length,
       declined: byStatus.Declined.length,

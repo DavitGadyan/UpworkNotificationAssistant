@@ -1,4 +1,4 @@
-import { getSettings, latestReport, listFeedback, saveReport, saveSettings } from "../db";
+import { getSettings, latestReport, listFeedback, listProposalOutcomesSafe, saveReport, saveSettings } from "../db";
 
 /*
  * The preference loop ("RLHF-lite"). No model is fine-tuned; instead David's signals tune the system:
@@ -7,7 +7,9 @@ import { getSettings, latestReport, listFeedback, saveReport, saveSettings } fro
  *      threshold, shown on Insights for David to apply or ignore;
  *   2. how much he edits drafts (lib/proposals/submit.ts) and which proposals he actually sends →
  *      few-shot style examples for the ProposalDraftAssistant (lib/agents/proposal.ts);
- *   3. recent thumbs are fed to the JobRankingAssistant prompt as calibration examples.
+ *   3. recent thumbs are fed to the JobRankingAssistant prompt as calibration examples;
+ *   4. what clients did with proposals he sent (lib/learning/outcomes.ts): a reply is a positive, viewed-no-reply
+ *      and never-viewed are negatives - extra samples here (when we still had the job's scores) and examples there.
  */
 
 export interface Calibration {
@@ -53,10 +55,15 @@ export function fitLogistic(samples: Sample[], iters = 2000, lr = 0.5, l2 = 0.01
 export async function calibrate(minSamples = 20): Promise<Calibration> {
   const fb = (await listFeedback("alert", 2000)).filter((f) => f.data && f.rating !== 0);
   const samples: Sample[] = fb.map((f) => ({ x: features(f.data!), y: f.rating > 0 ? 1 : 0 }));
+  const outcomes = (await listProposalOutcomesSafe({ limit: 1000 }))
+    .filter((o) => o.job?.rulesScore != null && (o.outcome === "win" || o.outcome === "loss_viewed" || o.outcome === "loss_unviewed"));
+  for (const o of outcomes) {
+    samples.push({ x: features({ rules: o.job!.rulesScore, llmFit: o.job!.llmFit, flags: o.job!.flags, category: o.job!.ruleCategory }), y: o.outcome === "win" ? 1 : 0 });
+  }
   const positives = samples.filter((s) => s.y === 1).length;
   const base: Calibration = { builtAt: new Date().toISOString(), samples: samples.length, positives, ok: false, message: "", coefficients: {}, proposed: null, accuracy: null };
   if (samples.length < minSamples || positives < 3 || positives > samples.length - 3) {
-    const r = { ...base, message: `Need at least ${minSamples} rated alerts with both 👍 and 👎 (have ${samples.length}, ${positives} 👍).` };
+    const r = { ...base, message: `Need at least ${minSamples} rated alerts or proposal outcomes with both good and bad examples (have ${samples.length}, ${positives} good).` };
     await saveReport("calibration", r);
     return r;
   }
@@ -72,7 +79,7 @@ export async function calibrate(minSamples = 20): Promise<Calibration> {
   for (const [k, v] of Object.entries(w)) if (k.startsWith("flag:") && v < 0) penalties[k.slice(5)] = Math.round(Math.min(40, -v * 10));
   const out: Calibration = {
     ...base, ok: true, accuracy: Math.round(acc * 100) / 100,
-    message: `Fitted on ${samples.length} rated alerts (${Math.round(acc * 100)}% agreement with your ratings).`,
+    message: `Fitted on ${fb.length} rated alerts and ${outcomes.length} proposal outcomes (${Math.round(acc * 100)}% agreement).`,
     coefficients: Object.fromEntries(Object.entries(w).map(([k, v]) => [k, Math.round(v * 100) / 100])),
     proposed: { weights: { rules: rulesW, llm: Math.round((1 - rulesW) * 100) / 100 }, telegramMin: thr, penalties },
   };

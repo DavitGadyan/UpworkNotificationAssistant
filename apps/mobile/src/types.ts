@@ -148,10 +148,15 @@ export interface Settings {
   rules: RankingRules;
   /** Draft a proposal automatically for every job ranked at or above minRank (never submitted). */
   autoDraft: { enabled: boolean; minRank: number; dailyCap: number; perCycle: number; webSearch: boolean };
+  /** Settings → Your fields: phrases added to the built-in field lists (web lib/ranking/fields.ts). */
+  profileFit?: { never: string[]; alsoMine: string[] };
 }
 
 /** pending = saved before its client record loaded; it is retried and never alerted until then. */
-export type JobStatus = "new" | "pending" | "notified" | "called" | "dismissed" | "drafting" | "applied";
+export type JobStatus = "new" | "pending" | "awaiting_ai" | "notified" | "called" | "dismissed" | "drafting" | "applied";
+
+/** Profile-fit gate (web lib/ranking/profileFit.ts). Off-profile jobs are excluded as "Not your field — …". */
+export interface ProfileFit { verdict: "core" | "adjacent" | "off"; field: string | null; reasons: string[] }
 
 export interface ScoreBreakdown {
   total: number; // 0-100 final rank
@@ -166,6 +171,7 @@ export interface ScoreBreakdown {
   llm?: LlmRanking | null;
   /** Advisory: how likely this client is to actually hire. Never changes `total` or the rules. */
   intent?: ClientIntent | null;
+  profileFit?: ProfileFit;
 }
 
 export type IntentArchetype =
@@ -365,7 +371,18 @@ export interface Calibration {
   proposed: { weights: { rules: number; llm: number }; telegramMin: number; penalties: Record<string, number> } | null;
   accuracy: number | null;
 }
-export type ReportKind = "coach" | "monthly_review" | "icp" | "calibration" | "closer" | "ghost_patterns";
+export type ReportKind = "coach" | "monthly_review" | "icp" | "calibration" | "closer" | "ghost_patterns" | "lessons" | "ranker_lessons" | "lessons_decision" | "prompt_lab" | "ranker_lab";
+
+/** What the client did with a sent proposal (public.proposal_outcomes, read-only for the app). */
+export type OutcomeLabel = "win" | "loss_viewed" | "loss_unviewed" | "pending" | "void";
+export interface ProposalOutcomeRow {
+  upwork_proposal_id: string; job_id: string; job_title: string; submitted_at: string; status: string; viewed: boolean; boosted: boolean;
+  bid_label: string | null; first_reply: string | null; outcome: OutcomeLabel;
+  insights: { proposalsTotal: number | null } | null; job: { field: string | null; clientCountry: string | null } | null;
+}
+export interface Lesson { id: string; target: "writer" | "ranker"; area: string; lesson: string; evidence: string; support: number; confidence: "low" | "medium" | "high" }
+export interface LessonsReport { builtAt: string; ok: boolean; message: string; headline: string | null; convinces: string | null; earnsClick: string | null; lessons: Lesson[] }
+export interface LessonsDecision { reportId: number; status: "approved" | "rejected"; ids: string[]; at: string }
 
 /** public.reports kind "ghost_patterns" (web lib/insights/ghosts.ts). Suggestions are never applied. */
 export interface GhostReport {
@@ -385,6 +402,8 @@ export interface HealthSummary { ok: boolean; workerStale: boolean; lateFeeds: n
 export interface HealthFull {
   ok: boolean; goal: string; workerHeartbeat: string | null; workerStale: boolean; lateAfterMin: number;
   feeds: { feedId: number; name: string; kind: string; lastOkAt: string | null; lastError: string | null; failures: number; successRate24h: number | null; runs24h: number; late: boolean }[];
+  /** Paused ⇒ new jobs wait for their AI check; nothing alerts on rules alone. Absent from older workers. */
+  aiRanking?: { paused: boolean; since: string | null; reason: string | null };
 }
 
 /** GET /api/usage. */
@@ -421,3 +440,21 @@ export interface CloserAdvice {
 }
 export interface CloserRoom { id: string; name: string; lastMessage: string; lastAt: string | null; awaiting: string | null; unread: boolean }
 export interface CloserInboxResponse { inbox: CloserRoom[]; inboxError: string | null; history: unknown[] }
+
+/** Prompt analytics (lib/learning/promptLab.ts LabBoard, saved as reports prompt_lab / ranker_lab). */
+export interface ArmStat { arm: number; label: string; n: number; wins: number; viewed: number; offers: number; hires: number; replyRate: number; viewRate: number; offerRate: number; hireRate: number; expected: number; pBest: number | null; kept: number | null }
+export interface LabBoardScenario { key: string; label: string; n: number; arms: ArmStat[]; best: number | null; verdict: "best" | "leading" | "single" | "not_enough_data"; pinned: number | null }
+export interface LabVersionProposal { upworkProposalId: string; localProposalId: number | null; jobId: string; jobTitle: string; submittedAt: string; outcome: OutcomeLabel; status: string; viewed: boolean; scenario: string; kept: number | null; rank: number | null }
+export interface LabBoard {
+  builtAt: string;
+  prompt: "proposal" | "job_ranking";
+  config: { enabled: boolean; arms: number[]; pinned: Record<string, number>; explore: number };
+  versions: { id: number; label: string; note: string | null; createdAt: string | null; active: boolean }[];
+  overall: LabBoardScenario;
+  byScenario: LabBoardScenario[];
+  byRank?: LabBoardScenario[];
+  decided: number;
+  proposals: Record<string, LabVersionProposal[]>;
+  funnel: { sent: number; decided: number; viewed: number; replied: number; offers: number; hires: number; connects: number };
+}
+export interface PromptStatRow { day: string; prompt: string; version: number; scenario: string; sent: number; viewed: number; replied: number; offers: number; hires: number }

@@ -62,6 +62,7 @@ export function mapRow(r: Row): Job {
     proposalsTier: exact == null ? r.proposals_tier ?? null : null,
     publishedAt: r.published_date ?? r.created_date ?? new Date().toISOString(),
     category: r.category ?? null,
+    subcategory: r.subcategory ?? null,
     duration: r.duration ?? null,
     workload: r.engagement ?? null,
     applied: !!r.applied,

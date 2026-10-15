@@ -26,10 +26,10 @@ export function TopBar({ unread }: { unread: number }) {
   return (
     <header className="sticky top-0 z-20 border-b border-[var(--color-line)] bg-[var(--color-frame)]/90 backdrop-blur">
       <div className="flex h-[72px] items-center gap-3 px-4 md:px-6">
-        <Link href="/" aria-label="Upwork Assistant home" className="mr-1 flex shrink-0 items-center gap-2.5">
+        <Link href="/" aria-label="Up Assistant home" className="mr-1 flex shrink-0 items-center gap-2.5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/icons/icon.svg" alt="" width={32} height={32} className="size-8 rounded-[9px] ring-1 ring-[var(--color-line)]" />
-          <span className="display hidden text-[17px] font-bold tracking-tight lg:block">Upwork Assistant</span>
+          <img src="/icons/icon-192.png" alt="" width={32} height={32} className="size-8 rounded-[9px] ring-1 ring-[var(--color-line)]" />
+          <span className="display hidden text-[17px] font-bold tracking-tight lg:block">Up Assistant</span>
         </Link>
         <form
           role="search"

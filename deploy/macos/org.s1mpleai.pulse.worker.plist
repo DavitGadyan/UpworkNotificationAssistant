@@ -5,7 +5,7 @@
   Install:  cp deploy/macos/org.s1mpleai.pulse.worker.plist ~/Library/LaunchAgents/ &&
             launchctl load -w ~/Library/LaunchAgents/org.s1mpleai.pulse.worker.plist
   Remove:   launchctl unload -w ~/Library/LaunchAgents/org.s1mpleai.pulse.worker.plist
-  Logs:     tail -f data/worker.log
+  Logs:     tail -f ~/Library/Logs/pulse-worker.log
 -->
 <plist version="1.0">
 <dict>
@@ -14,12 +14,13 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string><string>-lc</string>
-    <string>exec npx tsx --env-file=.env worker/index.ts</string>
+    <string>export PATH=/Users/dyada/.nvm/versions/node/v20.16.0/bin:/Users/dyada/.local/bin:$PATH; exec npx tsx --env-file=.env worker/index.ts</string>
   </array>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>/Users/dyada/.nvm/versions/node/v20.16.0/bin:/Users/dyada/.local/bin:/usr/local/bin:/usr/bin:/bin</string><key>HOME</key><string>/Users/dyada</string></dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>30</integer>
-  <key>StandardOutPath</key><string>/Users/dyada/Desktop/Github/UpworkNotificationAssistant/data/worker.log</string>
-  <key>StandardErrorPath</key><string>/Users/dyada/Desktop/Github/UpworkNotificationAssistant/data/worker.log</string>
+  <key>StandardOutPath</key><string>/Users/dyada/Library/Logs/pulse-worker.log</string>
+  <key>StandardErrorPath</key><string>/Users/dyada/Library/Logs/pulse-worker.log</string>
 </dict>
 </plist>

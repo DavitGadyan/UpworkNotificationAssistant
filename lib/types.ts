@@ -18,6 +18,8 @@ export interface Job {
   proposalsTier?: string | null;
   publishedAt: string; // ISO
   category: string | null;
+  /** Upwork subcategory ("Game Design & Development", "AI Apps & Integration"), when the feed row has it. */
+  subcategory?: string | null;
   duration?: string | null;
   workload?: string | null;
   applied?: boolean;
@@ -144,10 +146,22 @@ export interface Settings {
   rules: RankingRules;
   /** Draft a proposal automatically for every job ranked at or above minRank (never submitted). */
   autoDraft: { enabled: boolean; minRank: number; dailyCap: number; perCycle: number; webSearch: boolean };
+  /** Settings → Your fields: phrases added to the built-in field lists (lib/ranking/fields.ts). */
+  profileFit: { never: string[]; alsoMine: string[] };
 }
 
-/** pending = saved before its client record loaded; it is retried and never alerted until then. */
-export type JobStatus = "new" | "pending" | "notified" | "called" | "dismissed" | "drafting" | "applied";
+/**
+ * pending = saved before its client record loaded; awaiting_ai = record loaded but the AI ranking hasn't run yet
+ * (budget, outage, per-cycle cap). Both are retried and never alerted until then.
+ */
+export type JobStatus = "new" | "pending" | "awaiting_ai" | "notified" | "called" | "dismissed" | "drafting" | "applied";
+
+/** Profile-fit gate (lib/ranking/profileFit.ts): is this David's kind of work at all? */
+export interface ProfileFit {
+  verdict: "core" | "adjacent" | "off";
+  field: string | null;
+  reasons: string[];
+}
 
 export interface ScoreBreakdown {
   total: number; // 0-100 final rank
@@ -162,6 +176,8 @@ export interface ScoreBreakdown {
   llm?: LlmRanking | null;
   /** Advisory: how likely this client is to actually hire. Never changes `total` or the rules. */
   intent?: ClientIntent | null;
+  /** Off-profile jobs are excluded ("Not your field — …"); absent on rows scored before 2026-10-14. */
+  profileFit?: ProfileFit;
 }
 
 export type IntentArchetype =
@@ -201,8 +217,15 @@ export interface LlmRanking {
   reasons: string[];
   redFlags: string[];
   bigFish?: string;
+  similarProject?: boolean;
+  /** The AI's read: outside David's fields entirely (excluded like the profile-fit gate). */
+  offProfile?: boolean;
+  /** Which of his fields the work belongs to, in a few words. */
+  field?: string;
   /** The AI's own read of whether this client will hire (folded into score.intent). */
   intent?: { hireLikelihood: number; archetype: IntentArchetype; evidence: string[] };
+  /** job_ranking prompt version that judged it (null = built-in prompt). */
+  promptVersion?: number | null;
 }
 
 export interface CachedJob extends Job {
@@ -262,10 +285,76 @@ export interface Proposal {
   previewId: string | null;
   submittedAt: string | null;
   originalDraft: string;
+  /** The AI's bid before David's edits (to learn from bid changes). */
+  originalBid?: number | null;
   model: string | null;
   promptVersion: number | null;
+  /** Prompt-lab scenario when drafted (field · client tier) and why that prompt version was used. */
+  scenario?: string | null;
+  promptPick?: string | null;
+  /** Upwork's id for the sent proposal (read back after submit) - links it to its outcome. */
+  upworkProposalId?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * What the client did after David sent a proposal. Both kinds of loss are negative feedback, kept apart because
+ * they need different fixes: viewed-no-reply = the letter didn't convince; never viewed = job choice/timing/first line.
+ */
+/** void = no signal about David (he withdrew, or the client deleted the job as accidental/inappropriate). */
+export type OutcomeLabel = "win" | "loss_viewed" | "loss_unviewed" | "pending" | "void";
+
+export interface OutcomeJob {
+  category: string | null;
+  subcategory: string | null;
+  /** David's field per the profile-fit gate (null = unclear). */
+  field: string | null;
+  fitVerdict: "core" | "adjacent" | "off" | null;
+  contractType: string | null;
+  budget: string | null;
+  clientCountry: string | null;
+  clientSpent: number | null;
+  clientHires: number | null;
+  interviewed: number | null;
+  hired: number | null;
+  /** Our ranking when the job was still cached. */
+  rank: number | null;
+  rulesScore: number | null;
+  llmFit: number | null;
+  flags: string[];
+  ruleCategory: string | null;
+  description: string;
+  /** The client invited David to apply (an invitation sits in the proposal room). */
+  invited?: boolean;
+  /** job_ranking prompt version that ranked the job (null = built-in; undefined = not ranked by the AI). */
+  rankerVersion?: number | null;
+}
+
+export interface ProposalOutcome {
+  upworkProposalId: string;
+  jobId: string;
+  jobTitle: string;
+  localProposalId: number | null;
+  submittedAt: string;
+  status: string;
+  statusLabel: string | null;
+  archiveReason: string | null;
+  viewed: boolean;
+  boosted: boolean;
+  connectsBid: number | null;
+  bid: number | null;
+  bidLabel: string | null;
+  coverLetter: string | null;
+  insights: { proposalsTotal: number | null; opened: number | null; messaged: number | null; shortlisted: number | null } | null;
+  roomId: string | null;
+  repliedAt: string | null;
+  firstReply: string | null;
+  outcome: OutcomeLabel;
+  job: OutcomeJob | null;
+  checks: number;
+  nextCheckAt: number;
+  updatedAt: number;
 }
 
 export interface FeedbackRow {

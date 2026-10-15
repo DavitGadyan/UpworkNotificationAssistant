@@ -27,7 +27,7 @@ export default async function Overview({ searchParams }: { searchParams: SP }) {
   const sp = await searchParams;
   const settings = await getSettings();
   const searches = await listSearches();
-  const jobs = await listJobs();
+  const jobs = await listJobs({ offProfile: "hide" }); // jobs outside his fields don't count as found or matched
   const tokens = await getTokens();
   const hb = await getWorkerHeartbeat();
   const countries = [...new Set(jobs.map((j) => j.client.country).filter(Boolean) as string[])].sort();
@@ -67,6 +67,12 @@ export default async function Overview({ searchParams }: { searchParams: SP }) {
         }
       />
 
+      {health?.aiRanking.paused && (
+        <div role="status" className="card mb-6 border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-4 text-[15px]">
+          <b>AI ranking paused</b>{health.aiRanking.since ? ` since ${timeAgo(health.aiRanking.since)}` : ""} - {health.aiRanking.reason}. New jobs wait as
+          “Waiting for AI check” and nothing is alerted on rules alone. It resumes at 00:00 UTC, or raise the budget in <a href="/settings" className="underline">Settings → AI models</a>.
+        </div>
+      )}
       {health && <PollingHealth h={health} />}
 
       <UsageCard />

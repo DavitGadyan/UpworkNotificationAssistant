@@ -143,8 +143,90 @@ describe("enrich before judging", () => {
     const llm = { model: "m", category: "ai" as const, fit: 85, valuePotential: 40, summary: "", finalProduct: "", skillsWanted: [], reasons: [], redFlags: [] };
     expect(alertLane({ ...base, llm, rules: { score: 50, rejected: null, flags: [], passes: [], category: "ai", derived: { avgPaid: null, avgPerContract: null, lastHireDays: null, hireRate: null } } }, 60)).toBe("strong_fit");
     expect(alertLane({ ...base, llm, rules: { score: 50, rejected: null, flags: [{ code: "cheap_history", label: "", severity: "red", penalty: 20 }], passes: [], category: "ai", derived: { avgPaid: 12, avgPerContract: null, lastHireDays: null, hireRate: 16 } } }, 60)).toBeNull();
-    expect(alertLane({ ...base, total: 70 }, 60)).toBe("rank");
+    expect(alertLane({ ...base, total: 70 }, 60, false)).toBe("rank"); // AI off in Settings: rules decide
+    expect(alertLane({ ...base, total: 70 }, 60)).toBeNull(); // AI on: never alert without its verdict
+    expect(alertLane({ ...base, total: 70, llm }, 60)).toBe("rank");
     expect(alertLane({ ...base, total: 90, excluded: "India" }, 60)).toBeNull();
+  });
+
+  const aiOn = async () => {
+    const { getSettings, saveSettings } = await import("@/lib/db");
+    // claude-cli makes the AI count as available without an API key; the rank hook stands in for the model.
+    await saveSettings({ telegramMin: 10, callMode: "off", llm: { ...(await getSettings()).llm, provider: "claude-cli" } });
+  };
+  const verdict = { model: "m", category: "ai" as const, offProfile: false, field: "Voice AI agents", fit: 90, valuePotential: 80, summary: "s", finalProduct: "p", skillsWanted: [], reasons: [], redFlags: [], bigFish: "", similarProject: true };
+
+  it("never ranks, alerts or lists work outside David's fields", async () => {
+    const { listJobs } = await import("@/lib/db");
+    await aiOn();
+    const f = await feed();
+    const sent: string[] = [];
+    let ranked = 0;
+    const [base] = demoJobs(Date.now(), "o");
+    const j = { ...base, title: "Unreal Engine 5 Level Designer, greybox to encounter scripting", skills: ["Unreal Engine", "Game Development Skills"] };
+    await processResults(f, [j], { notifiers: notifiers(sent), hooks: { enrich: async () => null, rank: async () => { ranked++; return verdict; } } });
+    expect(sent).toEqual([]);
+    expect(ranked).toBe(0);
+    const [stored] = await listJobs({ status: "all" });
+    expect(stored.score.excluded).toMatch(/^Not your field — Game development/);
+    expect(stored.score.total).toBe(0);
+    expect(await listJobs({ status: "all", offProfile: "hide" })).toHaveLength(0);
+    expect(await listJobs({ status: "all", offProfile: "only" })).toHaveLength(1);
+  });
+
+  it("excludes a job the AI calls off-profile", async () => {
+    const { listJobs } = await import("@/lib/db");
+    await aiOn();
+    const f = await feed();
+    const sent: string[] = [];
+    const [j] = demoJobs(Date.now(), "a");
+    const rank = async () => ({ ...verdict, offProfile: true, field: "sales role", fit: 5 });
+    await processResults(f, [j], { notifiers: notifiers(sent), hooks: { enrich: async () => null, rank } });
+    expect(sent).toEqual([]);
+    expect((await listJobs({ status: "all" }))[0].score.excluded).toBe("Not your field — sales role");
+  });
+
+  it("holds jobs the AI couldn't rank and alerts them once it can, without reopening the job", async () => {
+    const { listJobs } = await import("@/lib/db");
+    const { retryAwaitingAi } = await import("@/lib/pipeline");
+    const { BudgetError } = await import("@/lib/agents/llm");
+    const { aiRankingState } = await import("@/lib/aiStatus");
+    await aiOn();
+    const f = await feed();
+    const sent: string[] = [];
+    const [j] = demoJobs(Date.now(), "h");
+    const broke = { enrich: async () => null, rank: async () => { throw new BudgetError("Daily LLM budget of $5 reached"); } };
+    const r = await processResults(f, [j], { notifiers: notifiers(sent), hooks: broke });
+    expect(r.awaitingAi).toBe(1);
+    expect(sent).toEqual([]);
+    expect(await listJobs({ status: "awaiting_ai" })).toHaveLength(1);
+    expect((await aiRankingState()).paused).toBe(true);
+
+    const opened: string[] = [];
+    const ok = { enrich: async (id: string) => { opened.push(id); return null; }, rank: async () => verdict };
+    const r2 = await retryAwaitingAi({ notifiers: notifiers(sent), hooks: ok });
+    expect(r2.ranked).toBe(1);
+    expect(sent).toEqual([j.id]);
+    expect(opened).toEqual([]);
+    expect((await aiRankingState()).paused).toBe(false);
+    expect(await listJobs({ status: "awaiting_ai" })).toHaveLength(0);
+  });
+});
+
+describe("AI spend ledger", () => {
+  beforeEach(() => resetDbForTests());
+  it("reads several days in one query and feeds the usage report", async () => {
+    const { kvSet } = await import("@/lib/db");
+    const { ledgerDays } = await import("@/lib/agents/llm");
+    const { usageReport } = await import("@/lib/usage");
+    const day = (n: number) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+    await kvSet(`llm_ledger:${day(0)}`, { date: day(0), total: 1.5, calls: 3, byAgent: { ranking: 1.5 }, byModel: { "claude-sonnet-5-5": 1.5 } });
+    await kvSet(`llm_ledger:${day(2)}`, { date: day(2), total: 0.5, calls: 1, byAgent: { proposal: 0.5 }, byModel: { "claude-opus-5-5": 0.5 } });
+    const m = await ledgerDays([day(0), day(1), day(2)]);
+    expect([...m.keys()].sort()).toEqual([day(0), day(2)].sort());
+    const u = await usageReport({ offline: true });
+    expect(u.claude.last7).toBe(2);
+    expect(u.claude.byAgent30).toMatchObject({ ranking: 1.5, proposal: 0.5 });
   });
 });
 
@@ -158,8 +240,10 @@ describe("auto proposal drafts", () => {
     const e = { fetchedAt: "", description: "", connectsCost: null, connectsBalance: null, canApply: true, applied: false, status: "ACTIVE", subcategory: null, clientState: null, clientTimezone: null,
       record: { hires: 1, contractsTotal: 1, contractsActive: 0, totalSpent: 1, feedbackScore: 5, feedbackCount: 1, hours: 1, jobsPosted: 1, hireRatePercent: 100, openJobs: 1 },
       activity: { invitesSent: 0, interviewed: 0, hired: 0, offered: 0, unansweredInvites: 0 }, bidStats: null, workHistory: [], reviews: [], otherOpenJobs: [], screeningQuestions: [], preferredQualifications: null };
-    const sc = (total: number, excluded: string | null = null) => ({ total, skills: 0, client: 0, budget: 0, competition: 0, excluded, matchedSkills: [] });
+    const llm = { model: "m", category: "ai" as const, fit: 80, valuePotential: 70, summary: "", finalProduct: "", skillsWanted: [], reasons: [], redFlags: [] };
+    const sc = (total: number, excluded: string | null = null, ai: typeof llm | null = llm) => ({ total, skills: 0, client: 0, budget: 0, competition: 0, excluded, matchedSkills: [], llm: ai });
     await insertJob(jobs[0], f.id, sc(80), Date.now(), { enrichment: e });             // ✓
+    await insertJob(jobs[5], f.id, sc(85, null, null), Date.now(), { enrichment: e }); // ranked on rules alone - no draft
     await insertJob(jobs[1], f.id, sc(59), Date.now(), { enrichment: e });             // below minRank
     await insertJob(jobs[2], f.id, sc(90), Date.now(), {});                            // no client record
     await insertJob(jobs[3], f.id, sc(95, "India"), Date.now(), { enrichment: e });    // excluded

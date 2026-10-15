@@ -1,20 +1,20 @@
 /*
- * Upwork Assistant service worker.
+ * Up Assistant service worker.
  *  - /api/* is never cached or intercepted (always live, never stale data or double submits).
  *  - Static build assets and icons: cache-first (they are content-hashed / immutable).
  *  - Pages: network-first; the last good copy of a page is served when offline, else an offline page.
  */
-const VERSION = "pulse-v1";
+const VERSION = "up-v2"; // bump to drop cached icons and pages after a rebrand
 const STATIC = `${VERSION}-static`;
 const PAGES = `${VERSION}-pages`;
-const OFFLINE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Offline · Upwork Assistant</title>
+const OFFLINE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Offline · Up Assistant</title>
 <style>body{margin:0;min-height:100dvh;display:grid;place-items:center;background:#F0F2F4;color:#191A1B;font:15px/1.5 Inter,system-ui,sans-serif;text-align:center;padding:24px}
 h1{font:700 28px/1.1 "Space Grotesk",system-ui,sans-serif;text-transform:uppercase;margin:0 0 8px}p{color:#6F7175;max-width:340px;margin:0 auto 20px}
 button{height:46px;padding:0 18px;border:0;border-radius:12px;background:#191A1B;color:#fff;font:inherit;font-weight:500}</style></head>
-<body><main><h1>Offline</h1><p>Upwork Assistant needs a connection to load fresh jobs and drafts. Pages you opened recently still work.</p><button onclick="location.reload()">Try again</button></main></body></html>`;
+<body><main><h1>Offline</h1><p>Up Assistant needs a connection to load fresh jobs and drafts. Pages you opened recently still work.</p><button onclick="location.reload()">Try again</button></main></body></html>`;
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(STATIC).then((c) => c.addAll(["/icons/icon-192.png", "/icons/icon.svg", "/manifest.webmanifest"])).catch(() => {}));
+  e.waitUntil(caches.open(STATIC).then((c) => c.addAll(["/icons/icon-192.png", "/icons/icon-512.png", "/manifest.webmanifest"])).catch(() => {}));
   self.skipWaiting();
 });
 

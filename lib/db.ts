@@ -1,6 +1,7 @@
+import { postedMs } from "./jobFilters";
 import { one, query, tx } from "./pg";
 import type {
-  CachedJob, FeedbackRow, Job, JobEnrichment, JobStatus, NotificationRow, Proposal, ProposalStatus,
+  CachedJob, FeedbackRow, Job, JobEnrichment, JobStatus, NotificationRow, OutcomeLabel, Proposal, ProposalOutcome, ProposalStatus,
   RankingRules, SavedSearch, ScoreBreakdown, Settings,
 } from "./types";
 
@@ -42,9 +43,10 @@ export const DEFAULT_SETTINGS: Settings = {
   source: "auto",
   guard: { maxEnrichPerCycle: 25, dailyCallCap: 2000, jitterSec: 30, minGapMs: 1500 },
   watch: { enabled: true, intervalMin: 15, maxHours: 72 },
-  llm: { enabled: true, provider: "api", rankingModel: "claude-sonnet-5-5", writerModel: "claude-opus-5-5", maxRankPerCycle: 20, dailyBudgetUsd: 2, prepaidCreditUsd: null, creditSetAt: null },
+  llm: { enabled: true, provider: "api", rankingModel: "claude-sonnet-5-5", writerModel: "claude-opus-5-5", maxRankPerCycle: 20, dailyBudgetUsd: 5, prepaidCreditUsd: null, creditSetAt: null },
   rules: DEFAULT_RULES,
   autoDraft: { enabled: true, minRank: 60, dailyCap: 10, perCycle: 3, webSearch: true },
+  profileFit: { never: [], alsoMine: [] },
 };
 
 
@@ -84,6 +86,7 @@ export function mergeSettings(s: Partial<Settings>): Settings {
     watch: { ...DEFAULT_SETTINGS.watch, ...s.watch },
     llm: { ...DEFAULT_SETTINGS.llm, ...s.llm },
     autoDraft: { ...DEFAULT_SETTINGS.autoDraft, ...s.autoDraft },
+    profileFit: { ...DEFAULT_SETTINGS.profileFit, ...s.profileFit },
     rules: {
       ...DEFAULT_RULES,
       ...s.rules,
@@ -214,17 +217,34 @@ const toCached = (r: JobRow): CachedJob => ({
   feeds: r.feeds ?? [],
 });
 
-export async function listJobs(opts: { status?: JobStatus | "all"; searchId?: number; q?: string; minScore?: number } = {}): Promise<CachedJob[]> {
+export async function listJobs(opts: {
+  status?: JobStatus | "all"; searchId?: number; q?: string; minScore?: number; maxScore?: number;
+  /** Posted-time window (epoch ms). */
+  since?: number | null; until?: number | null;
+  /** Jobs outside David's fields ("Not your field — …"): hidden from lists by default, or only those. */
+  offProfile?: "hide" | "only";
+} = {}): Promise<CachedJob[]> {
   const where: string[] = [];
   const args: unknown[] = [];
   if (opts.status && opts.status !== "all") { args.push(opts.status); where.push(`j.status = $${args.length}`); }
+  if (opts.offProfile === "hide") where.push(`coalesce(j.score->>'excluded', '') not like 'Not your field%'`);
+  if (opts.offProfile === "only") where.push(`j.score->>'excluded' like 'Not your field%'`);
   if (opts.searchId) { args.push(opts.searchId); where.push(`j.feed_id = $${args.length}`); }
   if (opts.minScore) { args.push(opts.minScore); where.push(`j.total >= $${args.length}`); }
+  if (opts.maxScore != null && opts.maxScore < 100) { args.push(opts.maxScore); where.push(`j.total <= $${args.length}`); }
   const rows = await query<JobRow>(`${JOB_SELECT} ${where.length ? "where " + where.join(" and ") : ""} order by j.published_at desc`, args);
   let jobs = rows.map(toCached);
   if (opts.q) {
     const q = opts.q.toLowerCase();
-    jobs = jobs.filter((j) => j.title.toLowerCase().includes(q) || j.skills.some((s) => s.toLowerCase().includes(q)));
+    jobs = jobs.filter((j) => j.title.toLowerCase().includes(q) || j.skills.some((s) => s.toLowerCase().includes(q))
+      || (j.enrichment?.description || j.description).toLowerCase().includes(q));
+  }
+  // published_at is stored as text in whatever format the feed returned, so compare parsed times here.
+  if (opts.since || opts.until) {
+    jobs = jobs.filter((j) => {
+      const t = postedMs(j);
+      return (!opts.since || t >= opts.since) && (!opts.until || t <= opts.until);
+    });
   }
   return jobs;
 }
@@ -233,8 +253,8 @@ export async function getJob(id: string): Promise<CachedJob | null> {
   return r ? toCached(r) : null;
 }
 /** Jobs saved without client details (enrichment failed or budget ran out) - retried before anything else. */
-export async function listPendingJobs(limit = 30, now = Date.now()): Promise<CachedJob[]> {
-  const rows = await query<JobRow>(`${JOB_SELECT} where j.status = 'pending' and j.fetched_at >= $1 order by j.published_at desc limit $2`, [now - RETENTION_MS, limit]);
+export async function listPendingJobs(limit = 30, now = Date.now(), status: "pending" | "awaiting_ai" = "pending"): Promise<CachedJob[]> {
+  const rows = await query<JobRow>(`${JOB_SELECT} where j.status = $3 and j.fetched_at >= $1 order by j.published_at desc limit $2`, [now - RETENTION_MS, limit, status]);
   return rows.map(toCached);
 }
 
@@ -376,6 +396,10 @@ export async function activePrompt(name: string): Promise<PromptVersion | null> 
   const r = await one<PromptRow>("select * from public.prompt_versions where name = $1 and active order by id desc limit 1", [name]);
   return r ? toPrompt(r) : null;
 }
+export async function getPromptVersion(id: number): Promise<PromptVersion | null> {
+  const r = await one<PromptRow>("select * from public.prompt_versions where id = $1", [id]);
+  return r ? toPrompt(r) : null;
+}
 export async function listPromptVersions(name?: string): Promise<PromptVersion[]> {
   return (await query<PromptRow>(`select * from public.prompt_versions ${name ? "where name = $1" : ""} order by id desc`, name ? [name] : [])).map(toPrompt);
 }
@@ -498,6 +522,86 @@ export async function outcomeStats(): Promise<{ archetype: string; tracked: numb
             count(*) filter (where status = 'open')::int open, round(avg(hire_likelihood))::int avg
      from public.job_outcomes group by 1 order by 2 desc`,
   )).map((r) => ({ archetype: r.archetype, tracked: r.tracked, hired: r.hired, closedNoHire: r.closed_no_hire, open: r.open, avgLikelihood: r.avg }));
+}
+
+// ---------- proposal outcomes (what clients did with David's sent proposals) ----------
+type ProposalOutcomeDb = {
+  upwork_proposal_id: string; job_id: string; job_title: string; local_proposal_id: number | null; submitted_at: string; status: string;
+  status_label: string | null; archive_reason: string | null; viewed: boolean; boosted: boolean; connects_bid: number | null; bid: string | number | null;
+  bid_label: string | null; cover_letter: string | null; insights: ProposalOutcome["insights"]; room_id: string | null; replied_at: string | null;
+  first_reply: string | null; outcome: OutcomeLabel; job: ProposalOutcome["job"]; checks: number; next_check_at: number; updated_at: number;
+};
+const toProposalOutcome = (r: ProposalOutcomeDb): ProposalOutcome => ({
+  upworkProposalId: r.upwork_proposal_id, jobId: r.job_id, jobTitle: r.job_title, localProposalId: r.local_proposal_id != null ? Number(r.local_proposal_id) : null,
+  submittedAt: r.submitted_at, status: r.status, statusLabel: r.status_label, archiveReason: r.archive_reason, viewed: r.viewed, boosted: r.boosted,
+  connectsBid: r.connects_bid, bid: r.bid != null ? Number(r.bid) : null, bidLabel: r.bid_label, coverLetter: r.cover_letter, insights: r.insights,
+  roomId: r.room_id, repliedAt: r.replied_at, firstReply: r.first_reply, outcome: r.outcome, job: r.job, checks: r.checks,
+  nextCheckAt: Number(r.next_check_at), updatedAt: Number(r.updated_at),
+});
+export async function getProposalOutcome(upworkProposalId: string): Promise<ProposalOutcome | null> {
+  const r = await one<ProposalOutcomeDb>("select * from public.proposal_outcomes where upwork_proposal_id = $1", [upworkProposalId]);
+  return r ? toProposalOutcome(r) : null;
+}
+export async function saveProposalOutcome(o: ProposalOutcome): Promise<void> {
+  await query(
+    `insert into public.proposal_outcomes(upwork_proposal_id, job_id, job_title, local_proposal_id, submitted_at, status, status_label, archive_reason,
+       viewed, boosted, connects_bid, bid, bid_label, cover_letter, insights, room_id, replied_at, first_reply, outcome, job, checks, next_check_at, updated_at)
+     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::text::jsonb,$16,$17,$18,$19,$20::text::jsonb,$21,$22,$23)
+     on conflict(upwork_proposal_id) do update set job_id = excluded.job_id, job_title = excluded.job_title, local_proposal_id = excluded.local_proposal_id,
+       submitted_at = excluded.submitted_at, status = excluded.status, status_label = excluded.status_label, archive_reason = excluded.archive_reason,
+       viewed = excluded.viewed, boosted = excluded.boosted, connects_bid = excluded.connects_bid, bid = excluded.bid, bid_label = excluded.bid_label,
+       cover_letter = excluded.cover_letter, insights = excluded.insights, room_id = excluded.room_id, replied_at = excluded.replied_at,
+       first_reply = excluded.first_reply, outcome = excluded.outcome, job = excluded.job, checks = excluded.checks,
+       next_check_at = excluded.next_check_at, updated_at = excluded.updated_at`,
+    [o.upworkProposalId, o.jobId, o.jobTitle, o.localProposalId, o.submittedAt, o.status, o.statusLabel, o.archiveReason, o.viewed, o.boosted,
+      o.connectsBid, o.bid, o.bidLabel, o.coverLetter, o.insights, o.roomId, o.repliedAt, o.firstReply, o.outcome, o.job, o.checks, o.nextCheckAt, o.updatedAt],
+  );
+}
+/** Newest first. `outcome` filters one label; `since` is an ISO submitted-at lower bound. */
+export async function listProposalOutcomes(opts: { outcome?: OutcomeLabel; since?: string; limit?: number } = {}): Promise<ProposalOutcome[]> {
+  const where: string[] = [], args: unknown[] = [];
+  if (opts.outcome) { args.push(opts.outcome); where.push(`outcome = $${args.length}`); }
+  if (opts.since) { args.push(opts.since); where.push(`submitted_at >= $${args.length}`); }
+  args.push(opts.limit ?? 500);
+  return (await query<ProposalOutcomeDb>(`select * from public.proposal_outcomes ${where.length ? "where " + where.join(" and ") : ""} order by submitted_at desc limit $${args.length}`, args)).map(toProposalOutcome);
+}
+/** Same as listProposalOutcomes, but [] while migration 007 isn't applied yet, so ranking and writing keep working without it. */
+export async function listProposalOutcomesSafe(opts: Parameters<typeof listProposalOutcomes>[0] = {}): Promise<ProposalOutcome[]> {
+  try { return await listProposalOutcomes(opts); } catch (e) {
+    if (/proposal_outcomes" does not exist/.test(String((e as Error)?.message))) return [];
+    throw e;
+  }
+}
+/** Rows whose reply check is due (pending ones, newest first). */
+export async function dueProposalOutcomes(limit: number, now = Date.now()): Promise<ProposalOutcome[]> {
+  return (await query<ProposalOutcomeDb>("select * from public.proposal_outcomes where next_check_at > 0 and next_check_at <= $1 order by submitted_at desc limit $2", [now, limit])).map(toProposalOutcome);
+}
+
+// ---------- prompt stats (daily trend per prompt version) ----------
+export interface PromptStatRow { day: string; prompt: string; version: number; scenario: string; sent: number; viewed: number; replied: number; offers: number; hires: number; kept: number | null; updatedAt: number }
+export async function upsertPromptStats(rows: PromptStatRow[]): Promise<void> {
+  for (const r of rows) {
+    await query(
+      `insert into public.prompt_stats(day, prompt, version, scenario, sent, viewed, replied, offers, hires, kept, updated_at) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       on conflict(day, prompt, version, scenario) do update set sent = excluded.sent, viewed = excluded.viewed, replied = excluded.replied,
+         offers = excluded.offers, hires = excluded.hires, kept = excluded.kept, updated_at = excluded.updated_at`,
+      [r.day, r.prompt, r.version, r.scenario, r.sent, r.viewed, r.replied, r.offers, r.hires, r.kept, r.updatedAt],
+    );
+  }
+}
+export async function listPromptStats(opts: { prompt: string; version?: number; scenario?: string; sinceDay?: string }): Promise<PromptStatRow[]> {
+  const where = ["prompt = $1"], args: unknown[] = [opts.prompt];
+  if (opts.version != null) { args.push(opts.version); where.push(`version = $${args.length}`); }
+  args.push(opts.scenario ?? "all"); where.push(`scenario = $${args.length}`);
+  if (opts.sinceDay) { args.push(opts.sinceDay); where.push(`day >= $${args.length}`); }
+  try {
+    const rows = await query<{ day: string; prompt: string; version: number; scenario: string; sent: number; viewed: number; replied: number; offers: number; hires: number; kept: string | null; updated_at: number }>(
+      `select * from public.prompt_stats where ${where.join(" and ")} order by day`, args);
+    return rows.map((r) => ({ day: r.day, prompt: r.prompt, version: Number(r.version), scenario: r.scenario, sent: r.sent, viewed: r.viewed, replied: r.replied, offers: r.offers, hires: r.hires, kept: r.kept == null ? null : Number(r.kept), updatedAt: Number(r.updated_at) }));
+  } catch (e) {
+    if (/prompt_stats" does not exist/.test(String((e as Error)?.message))) return [];
+    throw e;
+  }
 }
 
 // ---------- leader lease: only one worker polls Upwork even if two machines run ----------

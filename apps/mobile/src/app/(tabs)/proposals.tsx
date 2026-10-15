@@ -2,7 +2,7 @@ import { router } from "expo-router";
 import { useState } from "react";
 import { View } from "react-native";
 import { NoAccessBanner } from "../../components/access";
-import { Banner, Card, Empty, Pill, PressableScale, Row, Screen, Seg, T } from "../../components/ui";
+import { Banner, Card, Empty, Pill, PressableScale, Row, Screen, SearchField, Seg, T } from "../../components/ui";
 import { fetchProposals, useQuery } from "../../lib/data";
 import { money, timeAgo } from "../../lib/format";
 import { haptic } from "../../lib/haptics";
@@ -23,13 +23,17 @@ export default function Proposals() {
   const { noAccess } = useSettings();
   const q = useQuery("proposals", () => fetchProposals(), ["proposals"]);
   const [group, setGroup] = useState<Group>("todo");
-  const list = (q.data ?? []).filter((p) => group === "all" || GROUP[group].includes(p.status));
+  const [search, setSearch] = useState("");
+  const term = search.trim().toLowerCase();
+  const list = (q.data ?? []).filter((p) => (group === "all" || GROUP[group].includes(p.status))
+    && (!term || [p.jobTitle, p.coverLetter, p.research?.contactName, p.research?.company].filter(Boolean).join(" ").toLowerCase().includes(term)));
 
   return (
     <Screen title="Proposals" subtitle="Nothing is sent to Upwork until you submit here." onRefresh={q.refresh} refreshing={q.refreshing}>
       <NoAccessBanner show={noAccess} />
       {q.error ? <Banner tone="bad" title="Could not load proposals">{q.error}</Banner> : null}
-      <View style={{ marginBottom: 12 }}>
+      <View style={{ marginBottom: 12, gap: 10 }}>
+        <SearchField value={search} onChangeText={setSearch} placeholder="Search job, draft text or client" />
         <Seg value={group} onChange={(v) => { haptic.select(); setGroup(v); }} options={[
           { value: "todo", label: "To do" }, { value: "submitted", label: "Sent" }, { value: "discarded", label: "Discarded" }, { value: "all", label: "All" },
         ]} />

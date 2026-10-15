@@ -7,6 +7,9 @@ import { healthReport } from "./health";
 import { buildGhostReport } from "./insights/ghosts";
 import { buildIcp } from "./insights/icp";
 import { benchmarkPeers, monthlyReview, monthlySnapshot, syncProfile } from "./insights/metrics";
+import { buildLessons, decideLessons } from "./learning/lessons";
+import { syncProposalOutcomes } from "./learning/outcomes";
+import { saveLabReport, updateLabConfig } from "./learning/promptLab";
 import { query } from "./pg";
 import { approve, attachLoom, discard, editDraft, preview, submit } from "./proposals/submit";
 import { fetchViaClaude } from "./upwork/claudeFetch";
@@ -79,6 +82,12 @@ export async function dispatch(path: string, method: string, body: Body = {}): P
       case "calibrate": return calibrate();
       case "apply-calibration": return { applied: await applyCalibration() };
       case "ghosts": return buildGhostReport();
+      case "outcomes": return syncProposalOutcomes({ maxCalls: 60 });
+      case "lessons": return buildLessons(Date.now(), body.target === "ranker" ? "ranker" : "writer");
+      case "approve-lessons": return decideLessons(Number(body.reportId), "approved", Array.isArray(body.ids) ? (body.ids as unknown[]).map(String) : undefined);
+      case "reject-lessons": return decideLessons(Number(body.reportId), "rejected");
+      case "lab": return updateLabConfig(body as Parameters<typeof updateLabConfig>[0]);
+      case "lab-refresh": return saveLabReport();
     }
   }
   throw new ActionError(`Unknown action ${method} ${p}`);

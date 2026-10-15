@@ -1,5 +1,5 @@
 import * as z from "zod/v4";
-import { createProposal, getJob, getProposal, getSettings, kvGet, kvSet, listProposals, updateJobData, updateProposal } from "../db";
+import { createProposal, getJob, getProposal, getSettings, kvGet, kvSet, listProposalOutcomesSafe, listProposals, updateJobData, updateProposal } from "../db";
 import { jobUrl } from "../format";
 import type { Proposal } from "../types";
 import { callTool } from "../upwork/mcp/client";
@@ -10,6 +10,8 @@ import { structured } from "./llm";
 import { culturalProfile } from "./closer";
 import { profileDigest, relevantProjects } from "./profile";
 import { getPrompt } from "./prompts";
+import { pickProposalPrompt, promptBody } from "../learning/promptLab";
+import { editExamples } from "../learning/edits";
 
 /*
  * ProposalDraftAssistant. Research → "big fish" diagnosis → draft in David's template.
@@ -58,7 +60,7 @@ export async function highlights(): Promise<Highlights | null> {
 }
 
 /** Distilled from knowledge_base/closer_playbook.md for the very first message. */
-const FIRST_CONTACT_RULES = [
+export const FIRST_CONTACT_RULES = [
   "- Teach, don't pitch: lead with an insight about THEIR problem they may not have framed yet (Challenger).",
   "- Tailor to the reader's role and goals; one idea per sentence, no filler (Challenger).",
   "- Take control gently: propose one clear next step, never several options (Closing).",
@@ -87,12 +89,12 @@ export function structureProblems(cover: string): string[] {
 const RewriteSchema = z.object({ coverLetter: z.string() });
 
 /** One corrective pass when the draft breaks the structure or the length cap. */
-async function enforceStructure(cover: string, model: string, system: string, agent: string): Promise<string> {
+async function enforceStructure(cover: string, model: string, system: string, agent: string, kind: "auto" | "manual" = "manual"): Promise<string> {
   let out = cover.includes(LOOM_PLACEHOLDER) || /^loom\s*:/im.test(cover) ? cover : cover.replace(/\n\s*\n/, `\n\nLoom: ${LOOM_PLACEHOLDER}\n\n`);
   const problems = structureProblems(out);
   if (!problems.length) return out;
   const { data } = await structured({
-    model, system, schema: RewriteSchema, effort: "medium", agent, maxTokens: 4000,
+    model, system, schema: RewriteSchema, effort: "medium", agent, kind, maxTokens: 4000,
     user: `Rewrite this proposal so it follows the required structure exactly and is at most ${MAX_COVER_CHARS} characters. Fix: ${problems.join("; ")}. Keep the meaning, the client's name, the Loom line (${LOOM_PLACEHOLDER} or the existing link) and the budget. Cut words, not substance.\n\n${out}`,
   });
   out = data.coverLetter;
@@ -105,7 +107,8 @@ export async function rewriteProposal(id: number): Promise<Proposal> {
   if (!p) throw new Error("Proposal not found");
   if (p.status === "submitted") throw new Error("Already submitted");
   const s = await getSettings();
-  const prompt = await getPrompt("proposal");
+  // Same prompt version that wrote the draft, so the A/B comparison stays clean.
+  const prompt = { body: (await promptBody(p.promptVersion)) ?? (await getPrompt("proposal")).body };
   const job = await getJob(p.jobId);
   const culture = culturalProfile(job?.client.country);
   const system = [prompt.body, "## First-contact sales rules", FIRST_CONTACT_RULES, `## Cultural profile - ${culture.country} (hypothesis)`, culture.profile.summary].join("\n\n");
@@ -119,8 +122,18 @@ export async function rewriteProposal(id: number): Promise<Proposal> {
   return (await updateProposal(id, { coverLetter: cover, status, approvedAt: status === "ready" ? null : p.approvedAt, previewId: null }))!;
 }
 
-/** Past drafts David approved and submitted (after his edits) - the best style examples. */
-async function styleExamples(): Promise<string> {
+/**
+ * Style examples: proposals that actually got a client reply (proposal_outcomes), closest field first; falls back
+ * to recently sent drafts. Proposals that got no reply are never used as examples.
+ */
+export async function styleExamples(field: string | null = null): Promise<string> {
+  const wins = (await listProposalOutcomesSafe({ outcome: "win", limit: 40 })).filter((o) => (o.coverLetter ?? "").length > 80);
+  wins.sort((a, b) => Number((b.job?.field ?? null) === field && !!field) - Number((a.job?.field ?? null) === field && !!field));
+  const picked = wins.slice(0, 3);
+  if (picked.length) {
+    return "\n\nProposals of David's that clients REPLIED to (match their voice and what made them work - the structure and length rules above always win; never reuse their facts):\n" +
+      picked.map((o, i) => `--- winner ${i + 1}: ${o.jobTitle}${o.job?.field ? ` (${o.job.field})` : ""}\n${(o.coverLetter ?? "").slice(0, 1500)}`).join("\n");
+  }
   const done = (await listProposals({ status: "submitted" })).slice(0, 3);
   if (!done.length) return "";
   return "\n\nProposals David actually sent recently (match the voice only - the structure and length rules above always win; never reuse their facts):\n" +
@@ -140,7 +153,8 @@ export async function draftProposal(jobId: string, opts: { webSearch?: boolean; 
     }
   }
   const s = await getSettings();
-  const prompt = await getPrompt("proposal");
+  const field = job.score.llm?.field || job.score.profileFit?.field || null;
+  const prompt = await pickProposalPrompt({ field: job.score.profileFit?.field ?? field, clientSpent: job.client.totalSpent ?? null });
   const h = await highlights();
   const rel = relevantProjects(`${job.title} ${job.skills.join(" ")} ${(enrichment?.description || job.description).slice(0, 3000)}`, 5);
   const culture = culturalProfile(job.client.country);
@@ -152,7 +166,8 @@ export async function draftProposal(jobId: string, opts: { webSearch?: boolean; 
     `${culture.profile.summary}\nDo: ${culture.profile.do.join("; ")}\nAvoid: ${culture.profile.avoid.join("; ")}`,
     "## David's profile and portfolio (the only facts you may claim)",
     await profileDigest({ projects: true }),
-    await styleExamples(),
+    await styleExamples(field),
+    await editExamples(field).catch(() => ""),
   ].join("\n\n");
   const user = [
     jobBrief(job, enrichment),
@@ -166,12 +181,14 @@ export async function draftProposal(jobId: string, opts: { webSearch?: boolean; 
     `Keep the literal placeholder ${LOOM_PLACEHOLDER} on the "Loom:" line right after the opener. 600-900 characters total.`,
   ].filter(Boolean).join("\n");
 
+  // Background auto-drafts respect the daily AI budget; a draft David asked for may exceed it.
+  const kind = opts.agent === "autodraft" ? "auto" : "manual";
   const { data, model } = await structured({
-    model: s.llm.writerModel, system, user, schema: DraftSchema, effort: "high", agent: opts.agent ?? "proposal", maxTokens: 16000,
+    model: s.llm.writerModel, system, user, schema: DraftSchema, effort: "high", agent: opts.agent ?? "proposal", kind, maxTokens: 16000,
     ...(opts.webSearch !== false ? { webSearch: { maxUses: 3 } } : {}),
   });
 
-  const cover = await enforceStructure(data.coverLetter, s.llm.writerModel, system, opts.agent ?? "proposal");
+  const cover = await enforceStructure(data.coverLetter, s.llm.writerModel, system, opts.agent ?? "proposal", kind);
   return await createProposal({
     jobId,
     jobTitle: job.title,
@@ -189,7 +206,10 @@ export async function draftProposal(jobId: string, opts: { webSearch?: boolean; 
     previewId: null,
     submittedAt: null,
     originalDraft: cover,
+    originalBid: data.bid,
     model,
     promptVersion: prompt.version,
+    scenario: prompt.scenario.label,
+    promptPick: prompt.reason,
   });
 }

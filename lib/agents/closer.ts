@@ -4,6 +4,7 @@ import * as z from "zod/v4";
 import { getJob, getSettings, listProposals, saveReport } from "../db";
 import { callTool } from "../upwork/mcp/client";
 import { normalizeCountry } from "../upwork/mcp/jobs";
+import { parseStories } from "../upwork/mcp/proposals";
 import { jobBrief } from "./jobRanking";
 import { structured, untrusted } from "./llm";
 import { profileDigest } from "./profile";
@@ -43,19 +44,17 @@ const CloserSchema = z.object({
 });
 export type CloserAdvice = z.infer<typeof CloserSchema> & { model: string; country: string; roomId: string | null; createdAt: string; reportId?: number };
 
-type Msg = { from?: string; from_self?: boolean; from_side?: string; message?: string; text?: string; created?: string; createdDateTime?: string };
-
 /** Read a room's thread (newest first upstream) and return it oldest → newest as plain lines. */
 export async function readThread(roomId: string, max = 60): Promise<string> {
-  const r = await callTool<{ messages?: Msg[]; stories?: Msg[] }>("get_messages", "list_messages", { room_id: roomId, limit: Math.min(100, max) });
-  const msgs = (r.messages ?? r.stories ?? []).slice(0, max).reverse();
-  return msgs.map((m) => `${m.from_self ? "David" : m.from_side === "client" ? `Client (${m.from ?? "?"})` : m.from ?? "?"}: ${(m.message ?? m.text ?? "").trim()}`).join("\n");
+  const r = await callTool<Record<string, unknown>>("get_messages", "list_messages", { room_id: roomId, limit: Math.min(100, max) });
+  const msgs = parseStories(r).slice(0, max).reverse();
+  return msgs.map((m) => `${m.self ? "David" : m.side === "client" ? `Client (${m.from})` : m.from}: ${m.text}`).join("\n");
 }
 
 export async function findRoomForProposal(upworkProposalId: string): Promise<string | null> {
   try {
-    const r = await callTool<{ room_id?: string; id?: string; room?: { id?: string } }>("get_messages", "find_room", { context_type: "proposal", context_id: upworkProposalId });
-    return r.room_id ?? r.room?.id ?? r.id ?? null;
+    const r = await callTool<{ room_id?: string; id?: string; room?: { id?: string }; data?: { proposalRoom?: { id?: string } } }>("get_messages", "find_room", { context_type: "proposal", context_id: upworkProposalId });
+    return r.data?.proposalRoom?.id ?? r.room_id ?? r.room?.id ?? r.id ?? null;
   } catch { return null; }
 }
 
@@ -105,13 +104,17 @@ export async function suggestReply(input: CloserInput): Promise<CloserAdvice> {
 
 /** Rooms waiting on David, newest first - the Closer inbox. */
 export async function closerInbox(limit = 20) {
-  const r = await callTool<{ rooms?: Record<string, unknown>[]; data?: unknown }>("get_messages", "list_rooms", { limit });
-  return (r.rooms ?? []).map((x) => ({
-    id: String(x.id ?? x.room_id ?? ""),
-    name: String(x.name ?? x.room_name ?? x.topic ?? "Conversation"),
-    lastMessage: String(x.last_message ?? x.latest_message ?? "").slice(0, 160),
-    lastAt: (x.last_message_at ?? x.updated ?? x.last_activity ?? null) as string | null,
-    awaiting: (x.awaiting_reply_from ?? null) as string | null,
-    unread: Boolean(x.unread ?? (x.unread_count as number) > 0),
-  }));
+  const r = await callTool<{ rooms?: Record<string, unknown>[]; data?: { rooms?: Record<string, unknown>[] } }>("get_messages", "list_rooms", { limit });
+  return (r.data?.rooms ?? r.rooms ?? []).map((x) => {
+    const latest = (x.latestStory ?? {}) as { message?: string; createdDateTime?: string };
+    const lastAt = x.lastActivity != null && Number.isFinite(Number(x.lastActivity)) ? new Date(Number(x.lastActivity)).toISOString() : latest.createdDateTime ?? null;
+    return {
+      id: String(x.id ?? x.room_id ?? ""),
+      name: String(x.roomName ?? x.name ?? x.room_name ?? x.topic ?? "Conversation"),
+      lastMessage: String(latest.message ?? x.last_message ?? x.latest_message ?? "").slice(0, 160),
+      lastAt: (lastAt ?? x.last_message_at ?? x.updated ?? x.last_activity ?? null) as string | null,
+      awaiting: (x.awaiting_reply_from ?? null) as string | null,
+      unread: Boolean(x.unread ?? Number(x.numUnread ?? x.unread_count ?? 0) > 0),
+    };
+  });
 }

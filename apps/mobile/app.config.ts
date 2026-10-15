@@ -1,7 +1,7 @@
 import type { ExpoConfig } from "expo/config";
 
 /*
- * Display name "Upwork Assistant". Linked to EAS project "myupwork" (266fe118-…). Scheme and bundle id/package
+ * Display name "Up Assistant". Linked to EAS project "myupwork" (266fe118-…). Scheme and bundle id/package
  * stay "pulse".
  */
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? "https://odijvbiyojhklxffgufs.supabase.co";
@@ -10,7 +10,7 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "https://jobs.s1mpleai.org";
 const PROJECT_ID = process.env.EXPO_PUBLIC_EAS_PROJECT_ID || "266fe118-a610-4e68-82d5-580301abd2f4"; // EAS project "myupwork"
 
 const config: ExpoConfig = {
-  name: "Upwork Assistant",
+  name: "Up Assistant",
   slug: "myupwork", // must match the EAS project
   version: "1.0.0",
   orientation: "portrait",
@@ -25,7 +25,13 @@ const config: ExpoConfig = {
   },
   android: {
     package: "org.s1mpleai.pulse",
-    adaptiveIcon: { foregroundImage: "./assets/adaptive-icon.png", backgroundColor: "#191A1B" },
+    // White "up" glyph inside the 66dp safe zone over the green gradient; the glyph doubles as the themed icon.
+    adaptiveIcon: {
+      foregroundImage: "./assets/adaptive-icon.png",
+      backgroundImage: "./assets/adaptive-background.png",
+      monochromeImage: "./assets/adaptive-icon.png",
+      backgroundColor: "#12B80D",
+    },
     predictiveBackGestureEnabled: false,
   },
   web: { output: "static", favicon: "./assets/favicon.png" },

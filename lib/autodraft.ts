@@ -5,13 +5,27 @@ import { getSettings, kvGet, kvSet, listJobs, listProposals, setJobStatus } from
 import { jobUrl } from "./format";
 import { sendPush } from "./notify/push";
 import { sendText } from "./notify/telegram";
+import { normTag, THREE_D_TAG } from "./ranking/fields";
+import { repeatPoster } from "./ranking/repeatPoster";
 import type { CachedJob } from "./types";
+
+/**
+ * Only tight AI fits are drafted automatically (David, 2026-10-15): the AI ranker's fit must be at least
+ * AUTO_DRAFT_MIN_FIT, and 3D work (Blender, 3ds Max, configurators...) is never auto-drafted - it still ranks
+ * and alerts, and David can draft it with one tap.
+ */
+export const AUTO_DRAFT_MIN_FIT = 75;
+const THREE_D_TITLE = /\b(3d|blender|cinema ?4d|c4d|3ds ?max|zbrush|keyshot|maya)\b/i;
+export const isThreeD = (j: Pick<CachedJob, "title" | "skills">) => THREE_D_TITLE.test(j.title) || j.skills.some((t) => THREE_D_TAG.test(normTag(t)));
+/** Repeat posters (same job again and again, same freelancers rehired) never get an automatic draft either. */
+export const tightAiFit = (j: CachedJob) => (j.score.llm?.fit ?? 0) >= AUTO_DRAFT_MIN_FIT && j.score.profileFit?.verdict !== "off" && !isThreeD(j) && !repeatPoster(j, j.enrichment);
 
 /*
  * Auto proposal drafts: every job ranked ≥ autoDraft.minRank (default 60) gets an Opus draft without a tap,
  * at most `perCycle` per worker cycle and `dailyCap` per day. Drafts wait as "needs_loom" - nothing is ever
- * submitted; the Loom → approve → preview → SUBMIT gate is unchanged. Only jobs with a loaded client record
- * and no existing draft qualify.
+ * submitted; the Loom → approve → preview → SUBMIT gate is unchanged. Only jobs with a loaded client record,
+ * an AI ranking verdict (never on rules alone) and no existing draft qualify. Drafts count against the daily
+ * AI budget like the ranker (kind "auto"), so they can't run it dry unnoticed. Only tight AI fits qualify (below).
  */
 
 const dayKey = () => `autodraft:${new Date().toISOString().slice(0, 10)}`;
@@ -22,8 +36,9 @@ export async function autoDraftCandidates(now = Date.now()): Promise<CachedJob[]
   const drafted = new Set((await listProposals()).map((p) => p.jobId));
   return (await listJobs({ status: "all", minScore: s.minRank }))
     // High ghost risk (likely not hiring) never gets an automatic draft - rules unchanged, advisory only.
-    .filter((j) => !j.score.excluded && j.enrichment && !drafted.has(j.id) && j.score.intent?.ghostRisk !== "high")
-    .filter((j) => !["dismissed", "applied", "pending"].includes(j.status))
+    .filter((j) => !j.score.excluded && j.score.llm && j.enrichment && !drafted.has(j.id) && j.score.intent?.ghostRisk !== "high")
+    .filter((j) => !["dismissed", "applied", "pending", "awaiting_ai"].includes(j.status))
+    .filter(tightAiFit)
     .filter((j) => now - new Date(j.fetchedAt).getTime() < 864e5)
     .sort((a, b) => b.score.total - a.score.total);
 }

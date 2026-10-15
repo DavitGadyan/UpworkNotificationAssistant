@@ -19,7 +19,7 @@ export async function registerForPush(): Promise<PushResult> {
   }
   let { status } = await Notifications.getPermissionsAsync();
   if (status !== "granted") status = (await Notifications.requestPermissionsAsync()).status;
-  if (status !== "granted") return { ok: false, reason: "Notifications are turned off for Upwork Assistant" };
+  if (status !== "granted") return { ok: false, reason: "Notifications are turned off for Up Assistant" };
   if (!config.projectId) return { ok: false, reason: "No EAS projectId - set EXPO_PUBLIC_EAS_PROJECT_ID (run `eas init`)" };
   try {
     const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId: config.projectId });

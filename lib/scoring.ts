@@ -1,11 +1,14 @@
+import type { FieldSpec } from "./ranking/fields";
 import { assessIntent, type ClientHistory } from "./ranking/intent";
+import { assessProfileFit } from "./ranking/profileFit";
 import { blend, evaluateRules, type RuleContext } from "./ranking/rules";
 import type { Job, RankingRules, SavedSearch, ScoreBreakdown } from "./types";
 import { DEFAULT_RULES } from "./db";
 
 /*
  * Score one job for one feed. Feed-level filters (exclude keywords / countries / proposal cap) run
- * first, then the JobRankingAssistant rules (lib/ranking/rules.ts), then the optional LLM blend.
+ * first, then the JobRankingAssistant rules (lib/ranking/rules.ts), then the profile-fit gate (work outside
+ * David's fields is excluded as "Not your field — …"), then the optional LLM blend.
  * Pure: same inputs → same score.
  */
 
@@ -35,12 +38,19 @@ export function matchedSkills(job: Job, search: SavedSearch): string[] {
   });
 }
 
+export const NOT_YOUR_FIELD = "Not your field";
+
 export function scoreJob(
-  job: Job, search: SavedSearch, now = new Date(), rules: RankingRules = DEFAULT_RULES, ctx: RuleContext & { history?: ClientHistory | null } = {},
+  job: Job, search: SavedSearch, now = new Date(), rules: RankingRules = DEFAULT_RULES,
+  ctx: RuleContext & { history?: ClientHistory | null; fields?: FieldSpec } = {},
 ): ScoreBreakdown {
   const r = evaluateRules(job, rules, { ...ctx, now });
   const feedExcluded = hardExclude(job, search);
-  const excluded = feedExcluded ?? r.rejected;
+  const fit = assessProfileFit({ ...job, subcategory: job.subcategory ?? ctx.enrichment?.subcategory ?? null }, ctx.fields);
+  const offProfile = fit.verdict === "off" ? `${NOT_YOUR_FIELD} — ${fit.field}`
+    : ctx.llm?.offProfile ? `${NOT_YOUR_FIELD} — ${ctx.llm.field?.trim() || "per the AI check"}` : null;
+  // Off-profile first: such jobs are hidden from the lists, whatever else also rules them out.
+  const excluded = offProfile ?? feedExcluded ?? r.rejected;
   const total = excluded ? 0 : blend(r, ctx.llm, rules.weights);
   const pen = r.flags.reduce((a, f) => a + f.penalty, 0);
   return {
@@ -55,5 +65,6 @@ export function scoreJob(
     llm: ctx.llm ?? null,
     // Advisory only: computed alongside, never feeds `total`.
     intent: excluded ? null : assessIntent(job, ctx.enrichment, { now, llm: ctx.llm, history: ctx.history }),
+    profileFit: fit,
   };
 }

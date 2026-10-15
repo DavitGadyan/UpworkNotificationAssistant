@@ -55,6 +55,8 @@ function RootStack() {
           <Stack.Screen name="proposal/[id]" options={{ title: "Proposal" }} />
           <Stack.Screen name="watchlist" options={{ title: "Watchlist" }} />
           <Stack.Screen name="insights" options={{ title: "Insights" }} />
+          <Stack.Screen name="prompts" options={{ title: "Prompt analytics" }} />
+          <Stack.Screen name="prompt/[id]" options={{ title: "Prompt version" }} />
           <Stack.Screen name="feeds" options={{ title: "Feeds" }} />
           <Stack.Screen name="settings" options={{ title: "Settings" }} />
         </Stack.Protected>

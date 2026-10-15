@@ -18,21 +18,38 @@ import { proposalsLow } from "../upwork/tiers";
  */
 
 const has = (text: string, words: RegExp) => words.test(text);
+/* Title and Upwork skill tags. Stems end in \w* so "fine-tuning", "data scientist", "copywriting" match. */
 const CAT: [JobCategory, RegExp][] = [
   ["mlops", /\b(mlops|ml ops|model (deployment|serving|monitoring)|sagemaker|vertex ai|kubeflow|mlflow|feature store|llmops)\b/i],
-  ["ai", /\b(ai|a\.i\.|llm|gpt|chatgpt|openai|claude|anthropic|gemini|genai|generative|rag|retrieval|langchain|langgraph|llamaindex|agentic|ai agent|agents?|chatbot|voice (ai|agent)|machine learning|deep learning|nlp|computer vision|fine.?tun|embeddings?|vector|mcp)\b/i],
+  ["ai", /\b(ai|llms?|gpt|chatgpt|openai|claude|anthropic|gemini|genai|gen ai|generative ai|rag|retrieval.augmented|langchain|langgraph|llamaindex|agentic|ai agents?|agent (development|framework|workflows?)|chatbots?|voice (ai|agents?)|machine learning|deep learning|nlp|computer vision|fine.?tun\w*|embeddings?|vector (db|database|store|search)|mcp)\b/i],
   ["devops", /\b(devops|kubernetes|k8s|terraform|ci\/cd|docker|aws infrastructure|gcp|azure|sre|helm|ansible)\b/i],
   ["saas", /\b(saas|mvp|web app|platform|full.?stack|dashboard|next\.?js|react|node\.?js|backend|api development)\b/i],
   ["automation", /\b(automation|automate|n8n|zapier|make\.com|workflow|rpa|integration)\b/i],
-  ["data", /\b(data scien|data engineer|analytics|etl|sql|tableau|power bi|forecast|statistic)\b/i],
-  ["marketing", /\b(seo|geo|aeo|marketing|social media|ads|ppc|content writer|copywrit|branding|pr\b)\b/i],
+  ["data", /\b(data scien\w*|data engineer\w*|analytics|etl|sql|tableau|power bi|forecast\w*|statistic\w*)\b/i],
+  ["marketing", /\b(seo|geo|aeo|marketing|social media|ads|ppc|content writ\w*|copywrit\w*|branding|pr)\b/i],
+];
+/*
+ * Descriptions use "AI", "agent", "rag", "vector", "platform" in every sense ("enemy AI", "rag doll physics",
+ * "agent of record", "vector illustration"), so only unambiguous phrases count there.
+ */
+const CAT_DESC: [JobCategory, RegExp][] = [
+  ["mlops", CAT[0][1]],
+  ["ai", /\b(artificial intelligence|machine learning|deep learning|llms?|large language models?|gpt-?\d*|chatgpt|openai|anthropic|langchain|langgraph|llamaindex|ai agents?|agentic|chatbots?|voice (ai|agents?)|nlp|computer vision|fine.?tun\w*|embeddings|vector (db|database|store|search)|retrieval.augmented|rag (pipeline|system|chatbot|app)|mcp server|generative ai|gen ?ai)\b/i],
+  ["devops", CAT[2][1]],
+  ["saas", /\b(saas|mvp|web app|full.?stack|next\.?js|react|node\.?js|api development)\b/i],
+  ["automation", /\b(automation|automate|n8n|zapier|make\.com|rpa)\b/i],
+  ["data", CAT[5][1]],
+  ["marketing", /\b(seo|aeo|marketing|social media|google ads|meta ads|facebook ads|ppc|content writ\w*|copywrit\w*|branding)\b/i],
 ];
 
 export function detectCategory(job: Pick<Job, "title" | "description" | "skills">): JobCategory {
-  const text = `${job.title} ${job.skills.join(" ")} ${job.description.slice(0, 1500)}`;
-  // Title decides first: "AI Voice Agent Developer" is AI even if the description mentions SEO.
+  // Title decides first: "AI Voice Agent Developer" is AI even if the description mentions SEO. Then the
+  // Upwork skill tags, then the description with the stricter patterns.
   for (const [cat, re] of CAT) if (has(job.title, re)) return cat;
-  for (const [cat, re] of CAT) if (has(text, re)) return cat;
+  const tags = job.skills.join(" · ");
+  for (const [cat, re] of CAT) if (has(tags, re)) return cat;
+  const desc = job.description.slice(0, 1500);
+  for (const [cat, re] of CAT_DESC) if (has(desc, re)) return cat;
   return "other";
 }
 

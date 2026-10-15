@@ -1,0 +1,25 @@
+# EAS Build uploads the git repo root. Send only the Expo app (apps/mobile): not the backend, knowledge_base
+# transcripts, data backups or docs. While this file exists, EAS ignores every .gitignore, so secrets and
+# build output are listed again below.
+/*
+!/apps
+/apps/*
+!/apps/mobile
+
+/apps/mobile/node_modules
+/apps/mobile/.expo
+/apps/mobile/dist
+/apps/mobile/web-build
+/apps/mobile/ios
+/apps/mobile/android
+/apps/mobile/screenshots
+/apps/mobile/.claude
+/apps/mobile/.vscode
+/apps/mobile/.env
+/apps/mobile/.env.*
+*.p8
+*.p12
+*.key
+*.jks
+*.mobileprovision
+.DS_Store

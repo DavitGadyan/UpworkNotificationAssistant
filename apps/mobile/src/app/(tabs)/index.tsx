@@ -2,6 +2,7 @@ import { router } from "expo-router";
 import { useState } from "react";
 import { Alert, View } from "react-native";
 import { NoAccessBanner } from "../../components/access";
+import { isOffProfile } from "../../components/job";
 import { IconBell, IconBriefcase, IconDoc, IconEye, IconSpark } from "../../components/icons";
 import { Banner, Button, Card, Divider, KV, Pill, Row, Screen, SectionTitle, Stat, T } from "../../components/ui";
 import { endpoints, getHealth, getHealthFull } from "../../lib/api";
@@ -29,7 +30,8 @@ export default function Overview() {
   const [now, setNow] = useState(() => Date.now());
 
   const since = now - DAY;
-  const all = jobs.data ?? [];
+  // Jobs outside his fields don't count as found or matched.
+  const all = (jobs.data ?? []).filter((j) => !isOffProfile(j.score));
   const new24 = all.filter((j) => j.fetchedAtMs >= since).length;
   const alerts = (notes.data ?? []).filter((n) => n.ok).length;
   const watching = (watch.data ?? []).filter((w) => !w.done).length;
@@ -65,6 +67,11 @@ export default function Overview() {
     <Screen title="Overview" subtitle="Every feed in one place: what it found, what matched, what reached you." onRefresh={refresh} refreshing={refreshing}>
       {config.demo ? <Banner tone="info" title="Demo mode">Showing fixture data from src/demo.ts - nothing here is live.</Banner> : null}
       <NoAccessBanner show={settings.noAccess} />
+      {healthFull.data?.aiRanking?.paused ? (
+        <Banner tone="warn" title="AI ranking paused">
+          {`${healthFull.data.aiRanking.reason ?? "Daily AI budget reached"}. New jobs wait for the AI check and nothing is alerted on rules alone. It resumes at 00:00 UTC, or raise the budget in Settings.`}
+        </Banner>
+      ) : null}
       {paused ? <Banner tone="warn" title="Alerts are paused">No pushes or calls go out until you resume them in Settings.</Banner> : null}
 
       <View style={{ flexDirection: "row", gap: 12, marginBottom: 12 }}>

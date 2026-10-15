@@ -2,6 +2,8 @@ import { DataTable, FunnelChart, ShareBars, WinRateChart, type FunnelRow } from 
 import { GhostPatterns } from "@/components/insights/GhostPatterns";
 import { ManualMetricsForm } from "@/components/insights/ManualMetricsForm";
 import { RunButton } from "@/components/insights/RunButton";
+import { PromptLab } from "@/components/insights/PromptLab";
+import { WhatWins } from "@/components/insights/WhatWins";
 import { Bullets, CardHead, Note } from "@/components/ui/bits";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { PageHead } from "@/components/ui/PageHead";
@@ -47,7 +49,13 @@ export default async function Insights() {
     <>
       <PageHead title="Insights" subtitle="How your proposals convert, whether alerts are any good, and what to change on your profile. Reports refresh monthly on their own; run any of them now with its button." />
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] lg:items-start">
+      {/* (0) What wins: which proposals got a reply, and lessons for the AI (approve first) */}
+      <WhatWins />
+
+      {/* (0b) Prompt lab: which writer prompt version gets replies, per scenario */}
+      <PromptLab />
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] lg:items-start">
         {/* (a) Funnel */}
         <section className="card min-w-0 p-5 md:p-6" aria-labelledby="fun-h">
           <CardHead id="fun-h" title="Proposal funnel" right={<RunButton action="snapshot" label="Snapshot last month" done="Snapshot saved" />}

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Alert, View } from "react-native";
 import Svg, { Circle, G, Line, Path, Rect, Text as SvgText } from "react-native-svg";
+import { WhatWins } from "../components/whatWins";
 import { Banner, Bullets, Button, Card, Divider, Empty, KV, Pill, Row, Screen, SectionTitle, T } from "../components/ui";
 import { endpoints } from "../lib/api";
 import { fetchLatestReport, fetchSnapshots, useQuery } from "../lib/data";
@@ -166,6 +167,7 @@ export default function Insights() {
 
   return (
     <Screen header={false} padTop={false} onRefresh={refresh} refreshing={snaps.refreshing}>
+      <WhatWins />
       <SectionTitle right={<RunButton action="snapshot" label="Snapshot" confirm="Reads last month's proposals from the marketplace and saves a snapshot." onDone={snaps.reload} />}>Proposal funnel</SectionTitle>
       <Card style={{ marginBottom: 16 }}>
         <View onLayout={(e) => setW(e.nativeEvent.layout.width)}>

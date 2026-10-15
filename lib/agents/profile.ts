@@ -5,7 +5,7 @@ import { kvGet, kvSet } from "../db";
 /*
  * What the agents know about David. Two sources:
  *   - knowledge_base/portfolio.json - the curated project catalogue (from the portfolio site, via polishmycv);
- *   - the live Upwork profile (get_profile over MCP), cached in kv by lib/insights/profileSync.ts.
+ *   - the live Upwork profile (get_profile over MCP), synced daily into kv by syncProfile (lib/insights/metrics.ts).
  * Agents may only cite facts that appear here. Nothing is invented.
  */
 
@@ -53,8 +53,10 @@ export async function profileDigest(opts: { projects?: boolean } = {}): Promise<
     `Education: ${(p.education as string[] | undefined)?.join("; ") ?? ""}`,
     `Services: ${(p.services as string[] | undefined)?.join(", ") ?? ""}`,
     p.core_stack ? `Core stack: ${JSON.stringify(p.core_stack)}` : "",
-    "Portfolio website: https://davidgadyan.com/portfolio",
+    `Portfolio website: ${(p.links as { portfolio?: string } | undefined)?.portfolio ?? "https://davitgadyan.github.io/portfolio_app/"}`,
     live?.title ? `Upwork title: ${live.title}` : "",
+    live?.skills?.length ? `Upwork profile skills: ${live.skills.join(", ")}` : "",
+    live?.overview ? `Upwork profile overview (excerpt): ${live.overview.replace(/\s+/g, " ").slice(0, 1500)}` : "",
     live?.hourlyRate ? `Upwork rate: $${live.hourlyRate}/hr` : "",
     live?.jss ? `Job Success Score: ${live.jss}%` : "",
     live?.totalEarnings ? `Upwork earnings: ${live.totalEarnings}` : "",

@@ -3,6 +3,7 @@ import { IconEye, IconStar } from "@/components/icons";
 import { Empty } from "@/components/ui/bits";
 import { PageHead } from "@/components/ui/PageHead";
 import { UpworkLink } from "@/components/UpworkLink";
+import { SearchBox } from "@/components/SearchBox";
 import { getJob, getSettings, listWatches } from "@/lib/db";
 import { fmtDateTime, timeAgo, timeUntil } from "@/lib/format";
 
@@ -11,9 +12,11 @@ export const metadata = { title: "Watchlist" };
 
 const DONE: Record<string, string> = { crowded: "Too crowded", closed: "Job closed", hired: "Client hired", expired: "Job expired", timeout: "Watch ended" };
 
-export default async function Watchlist() {
+export default async function Watchlist({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+  const q = (await searchParams).q?.trim().toLowerCase() ?? "";
   const s = await getSettings();
-  const rows = await Promise.all((await listWatches()).map(async (w) => ({ w, job: await getJob(w.jobId) })));
+  const rows = (await Promise.all((await listWatches()).map(async (w) => ({ w, job: await getJob(w.jobId) }))))
+    .filter(({ job }) => !q || (job?.title ?? "").toLowerCase().includes(q));
   rows.sort((a, b) => Number(!!a.w.done) - Number(!!b.w.done) || b.w.startedAt - a.w.startedAt);
   const active = rows.filter((r) => !r.w.done).length;
 
@@ -22,6 +25,7 @@ export default async function Watchlist() {
       <PageHead title="Watchlist"
         subtitle={`Alerted jobs whose proposal count is re-checked every ${s.watch.intervalMin} minutes for up to ${s.watch.maxHours} hours. You get a warning at ${s.rules.watchWarnAt} proposals; at ${s.rules.maxProposals} the job is dropped.`}
         meta={<><span className="num">{active} watching</span><span className="num">{rows.length - active} finished</span>{!s.watch.enabled && <span className="text-[var(--color-warn)]">Watching is off in Settings</span>}</>} />
+      <SearchBox placeholder="Search watched jobs by title" className="mb-4" />
 
       {rows.length === 0 ? (
         <Empty title="Nothing on the watchlist">

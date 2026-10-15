@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  IconBriefcase, IconChart, IconChat, IconClose, IconDoc, IconEye, IconFeed, IconGrid, IconMore, IconSettings, IconSpark,
+  IconBriefcase, IconChart, IconFlask, IconChat, IconClose, IconDoc, IconEye, IconFeed, IconGrid, IconMore, IconSettings, IconSpark,
 } from "@/components/icons";
 
 type Item = { href: string; label: string; short?: string; Icon: (p: { size?: number; className?: string }) => React.ReactElement };
@@ -18,6 +18,7 @@ const primary: Item[] = [
   { href: "/insights", label: "Insights", Icon: IconChart },
 ];
 const secondary: Item[] = [
+  { href: "/insights/prompts", label: "Prompts", Icon: IconFlask },
   { href: "/feeds", label: "Feeds", Icon: IconFeed },
   { href: "/alerts", label: "Alerts log", Icon: IconChat },
   { href: "/settings", label: "Settings", Icon: IconSettings },
@@ -33,7 +34,9 @@ const mobileMain = ["/", "/jobs", "/proposals", "/closer"];
 export function Rail({ initials }: { initials: string }) {
   const path = usePathname();
   const [more, setMore] = useState(false);
-  const active = (href: string) => (href === "/" ? path === "/" : path === href || path.startsWith(href + "/") || (href === "/feeds" && path.startsWith("/searches")));
+  const active = (href: string) => (href === "/" ? path === "/"
+    : href === "/insights" && path.startsWith("/insights/prompts") ? false // Prompts has its own item
+    : path === href || path.startsWith(href + "/") || (href === "/feeds" && path.startsWith("/searches")));
   useEffect(() => setMore(false), [path]);
   useEffect(() => {
     if (!more) return;

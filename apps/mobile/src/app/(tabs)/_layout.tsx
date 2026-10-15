@@ -16,7 +16,13 @@ export default function TabsLayout() {
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="proposals">
         <NativeTabs.Trigger.Label>Proposals</NativeTabs.Trigger.Label>
-        <NativeTabs.Trigger.Icon sf={{ default: "doc.text", selected: "doc.text.fill" }} md="description" />
+        {/* Centre tab: the green Upwork mark in its own colours (not tinted), larger than the symbols around it -
+            thick green outline when idle, filled tile when selected. Android keeps the Material icon. */}
+        <NativeTabs.Trigger.Icon
+          src={{ default: require("../../../assets/tab-proposals.png"), selected: require("../../../assets/tab-proposals-selected.png") }}
+          renderingMode="original"
+          md="description"
+        />
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="closer">
         <NativeTabs.Trigger.Label>Closer</NativeTabs.Trigger.Label>

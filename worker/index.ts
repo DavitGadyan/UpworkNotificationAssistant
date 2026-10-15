@@ -18,7 +18,7 @@ import { connectsBalance } from "@/lib/usage";
 import { hostname } from "node:os";
 import { sendText } from "@/lib/notify/telegram";
 import { pollCallbacks } from "@/lib/notify/telegramActions";
-import { processResults, retryPending, type CycleBudget } from "@/lib/pipeline";
+import { processResults, retryAwaitingAi, retryPending, type CycleBudget } from "@/lib/pipeline";
 import { RateLimitError } from "@/lib/ratelimit";
 import { GuardError, jitteredInterval } from "@/lib/upwork/guard";
 import { activeSource, fetchFeed } from "@/lib/upwork/source";
@@ -73,6 +73,11 @@ async function tick() {
     const p = await retryPending({ budget, ...(DRY ? { notifiers: dryNotifiers } : {}) });
     if (p.enriched || p.pending) log("pending retried", p);
   } catch (e) { log("pending retry error", (e as Error).message); }
+  // Then jobs that missed their AI check (budget/outage): they alert once the AI has ranked them.
+  try {
+    const a = await retryAwaitingAi({ budget, ...(DRY ? { notifiers: dryNotifiers } : {}) });
+    if (a.ranked || a.awaitingAi) log("awaiting AI retried", a);
+  } catch (e) { log("awaiting AI retry error", (e as Error).message); }
   for (const feed of (await listSearches()).filter((f) => f.enabled)) {
     if (stopping) break;
     try {
@@ -177,5 +182,13 @@ async function main() {
   process.exit(0);
 }
 
+// Network blips (Wi-Fi switch, DNS, pooler resets) must not kill the worker: log them and keep polling.
+const TRANSIENT = /ENOTFOUND|EAI_AGAIN|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|CONNECTION_DESTROYED|CONNECT_TIMEOUT|CONNECTION_CLOSED|socket hang up|fetch failed|timed out/i;
+process.on("unhandledRejection", (e) => {
+  const msg = String((e as Error)?.message ?? e);
+  if (TRANSIENT.test(msg) || TRANSIENT.test(String((e as { code?: string })?.code ?? ""))) { log(`network blip (ignored): ${msg.slice(0, 160)}`); return; }
+  log(`unhandled rejection - exiting so the supervisor restarts the worker: ${msg.slice(0, 300)}`);
+  process.exit(1);
+});
 for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, () => { stopping = true; log("stopping"); process.exit(0); });
 main();

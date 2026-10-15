@@ -115,6 +115,15 @@ export function cleanSettings(b: Record<string, unknown>, cur: Settings): Settin
         webSearch: bool(a.webSearch, c.webSearch),
       };
     })(),
+    profileFit: (() => {
+      const pf = obj(b.profileFit), c = cur.profileFit;
+      // Accept a list or a comma/newline-separated string; keep short phrases only.
+      const list = (v: unknown, fallback: string[]) => {
+        const items = Array.isArray(v) ? v.map(String) : typeof v === "string" ? v.split(/[,\n]/) : null;
+        return items ? [...new Set(items.map((x) => x.trim()).filter((x) => x.length > 1 && x.length <= 60))].slice(0, 100) : fallback;
+      };
+      return { never: list(pf.never, c.never), alsoMine: list(pf.alsoMine, c.alsoMine) };
+    })(),
   };
 }
 

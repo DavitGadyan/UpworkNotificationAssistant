@@ -10,13 +10,13 @@ const displayFont = DisplayFont({ subsets: ["latin"], variable: "--font-display-
 const bodyFont = BodyFont({ subsets: ["latin"], variable: "--font-body-loaded", display: "swap" });
 
 export const metadata: Metadata = {
-  title: { default: "Upwork Assistant", template: "%s · Upwork Assistant" },
-  applicationName: "Upwork Assistant",
+  title: { default: "Up Assistant", template: "%s · Up Assistant" },
+  applicationName: "Up Assistant",
   description: "Personal job alert and proposal assistant: ranks new jobs, watches competition, drafts proposals for review and coaches client replies.",
   robots: { index: false, follow: false },
   manifest: "/manifest.webmanifest",
-  icons: { icon: [{ url: "/icons/icon.svg", type: "image/svg+xml" }, { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }], apple: "/icons/apple-touch-icon.png" },
-  appleWebApp: { capable: true, title: "Upwork Asst", statusBarStyle: "default" },
+  icons: { icon: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }, { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" }], apple: "/icons/apple-touch-icon.png" },
+  appleWebApp: { capable: true, title: "Up Assistant", statusBarStyle: "default" },
   formatDetection: { telephone: false },
   other: { "mobile-web-app-capable": "yes" },
 };

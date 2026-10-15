@@ -1,4 +1,4 @@
-# Run Upwork Assistant on a home Ubuntu machine
+# Run Up Assistant on a home Ubuntu machine
 
 No static IP, port forwarding or domain is needed. The home machine only makes **outbound** connections:
 
@@ -53,7 +53,7 @@ Replace `david` with your Linux user:
 ```bash
 sudo tee /etc/systemd/system/upwork-worker.service >/dev/null <<'EOF'
 [Unit]
-Description=Upwork Assistant worker (polling, alerts, phone actions)
+Description=Up Assistant worker (polling, alerts, phone actions)
 Wants=network-online.target
 After=network-online.target
 [Service]
@@ -77,7 +77,7 @@ cd /opt/upwork-assistant && npm run build
 cp -r public .next/standalone/ && cp -r .next/static .next/standalone/.next/ && cp -r knowledge_base .next/standalone/
 sudo tee /etc/systemd/system/upwork-web.service >/dev/null <<'EOF'
 [Unit]
-Description=Upwork Assistant web dashboard
+Description=Up Assistant web dashboard
 After=network-online.target
 [Service]
 User=david
