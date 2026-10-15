@@ -1,0 +1,25 @@
+[Unit]
+Description=Up Assistant web dashboard (127.0.0.1:3010)
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+WorkingDirectory=/opt/up-assistant
+# `next start` reads .env from the working directory. It needs `npm run build` first.
+# Listens on localhost only: reach it with `ssh -L 3010:localhost:3010` (or change -H to 0.0.0.0 for
+# Tailscale, together with DASHBOARD_PASSWORD in .env).
+ExecStart=/opt/up-assistant/node_modules/.bin/next start -p 3010 -H 127.0.0.1
+Environment=NODE_ENV=production
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+MemoryMax=1200M
+
+[Install]
+WantedBy=multi-user.target

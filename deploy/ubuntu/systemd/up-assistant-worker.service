@@ -1,0 +1,29 @@
+[Unit]
+Description=Up Assistant worker (Upwork polling, ranking, alerts, reply tracking, phone action queue)
+Wants=network-online.target
+After=network-online.target
+# Never give up restarting (the default stops after 5 failures in 10 s).
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+WorkingDirectory=/opt/up-assistant
+# tsx loads .env itself (--env-file), same as on the Mac.
+ExecStart=/opt/up-assistant/node_modules/.bin/tsx --env-file=.env worker/index.ts
+Environment=NODE_ENV=production
+# The worker exits on a stuck cycle (15-min watchdog) or a non-network crash; systemd brings it straight back.
+Restart=always
+RestartSec=15
+# SIGTERM lets it release the lease and finish the current DB write.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+# Light hardening that doesn't get in the way (the app only writes under /opt/up-assistant and /tmp).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+MemoryMax=1500M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,3 +1,5 @@
+> **Superseded:** use [deploy/ubuntu/README.md](ubuntu/README.md) for the current 24/7 Ubuntu setup. This file is kept for reference.
+
 # Deploy to the GCP VM
 
 1. DNS (Namecheap): add `A  jobs  35.209.49.25` (the VM that already serves `api.improvtalk`). Keep the hostname neutral; never put "upwork" in it.

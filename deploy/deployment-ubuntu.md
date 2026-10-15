@@ -1,3 +1,5 @@
+> **Superseded:** use [deploy/ubuntu/README.md](ubuntu/README.md) for the current 24/7 Ubuntu setup. This file is kept for reference.
+
 # Deploying on Ubuntu (22.04 / 24.04)
 
 Target: the GCP VM `35.209.49.25`, which already serves `api.improvtalk.s1mpleai.org`. The app gets its own hostname, **`jobs.s1mpleai.org`**, and nothing existing on the box is touched. Keep the hostname and app name neutral: never put "upwork" in them.

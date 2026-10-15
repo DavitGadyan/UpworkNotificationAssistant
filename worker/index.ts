@@ -122,7 +122,7 @@ async function tick() {
   }
 
   if (src === "mcp") {
-    try { await runPeriodic(); } catch (e) { log("periodic error", (e as Error).message); }
+    try { const job = await runPeriodic(); if (job) log("periodic", job); } catch (e) { log("periodic error", (e as Error).message); }
   }
 }
 

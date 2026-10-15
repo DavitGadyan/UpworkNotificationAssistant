@@ -1,3 +1,5 @@
+> **Superseded:** use [deploy/ubuntu/README.md](ubuntu/README.md) for the current 24/7 Ubuntu setup. This file is kept for reference.
+
 # Run Up Assistant on a home Ubuntu machine
 
 No static IP, port forwarding or domain is needed. The home machine only makes **outbound** connections:
