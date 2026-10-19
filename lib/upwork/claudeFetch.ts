@@ -5,6 +5,7 @@ import { getSettings, kvGet, kvSet, listSearches } from "../db";
 import { recordFeedRun } from "../health";
 import { processResults } from "../pipeline";
 import type { SavedSearch } from "../types";
+import { decide, record } from "./governor";
 import { mapRow } from "./mcp/jobs";
 
 /*
@@ -84,7 +85,16 @@ export async function fetchViaClaude(kinds: ClaudeFeed[] = ["most_recent", "best
       const feed = await feedFor(kind);
       try {
         const prompt = `Call the upwork find_jobs tool exactly once with action "smart_search", org_uid "${org}", params {"mode":"${kind}","limit":10${kind === "most_recent" ? ',"days_posted":1' : ""}}. Then output ONLY the raw JSON array from the "jobs" field exactly as returned (every field, unchanged), with no commentary and no code fences.`;
-        const { result, cost } = await runClaude(prompt);
+        // This path uses the Claude CLI's own Upwork connector, outside guard.ts: ask the governor directly.
+        const d = await decide("find_jobs.smart_search", { feed: true });
+        if (!d.go) throw new Error(`Upwork pacing: ${d.reason}`);
+        let ran: { result: string; cost: number };
+        try { ran = await runClaude(prompt); } catch (e) {
+          await record("find_jobs.smart_search", false, (e as Error).message, { feed: true }, { log: true });
+          throw e;
+        }
+        await record("find_jobs.smart_search", true, null, { feed: true }, { log: true });
+        const { result, cost } = ran;
         res.costUsd += cost;
         await addSpend(cost, "claude-haiku-5-5 (cli)", "claude_fetch");
         const jobs = extractJobs(result).map((r) => mapRow(r as Parameters<typeof mapRow>[0]));

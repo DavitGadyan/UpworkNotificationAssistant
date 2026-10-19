@@ -93,7 +93,7 @@ export async function fetchFeedMcp(feed: SavedSearch, opts: { isKnown: (id: stri
     if (feed.kind === "most_recent") params.days_posted = 1;
     if (feed.verifiedPaymentOnly) params.verified_payment_only = true;
     if (feed.maxProposals != null) params.proposals_max = feed.maxProposals;
-    const r = await callTool<SearchResp>("find_jobs", "smart_search", params);
+    const r = await callTool<SearchResp>("find_jobs", "smart_search", params, { meta: { feed: true, category: `feed:${feed.id}` } });
     return (r.jobs ?? []).map(mapRow);
   }
   const base: Record<string, unknown> = { sort: "recency", limit: 10 };
@@ -104,7 +104,10 @@ export async function fetchFeedMcp(feed: SavedSearch, opts: { isKnown: (id: stri
   if (feed.maxProposals != null) base.proposals_max = feed.maxProposals;
 
   const variants: Record<string, unknown>[] = [];
-  const hourly = { ...base, job_type: "hourly", ...(feed.minHourly != null ? { rate_min: feed.minHourly } : {}) };
+  // No rate_min upstream: Upwork's rate filter drops hourly jobs with no stated rate (the website's saved search keeps
+  // them - e.g. "Zoho CRM - Remove Duplicates", 2026-10-15). The floor is applied here instead, keeping no-rate jobs.
+  const hourly = { ...base, job_type: "hourly" };
+  const rateOk = (j: Job) => feed.minHourly == null || j.jobType !== "HOURLY" || (j.hourlyMax ?? j.hourlyMin) == null || (j.hourlyMax ?? j.hourlyMin)! >= feed.minHourly;
   const fixed = { ...base, job_type: "fixed", ...(feed.minBudget != null ? { budget_min: feed.minBudget } : {}) };
   if (feed.jobType === "HOURLY") variants.push(hourly);
   else if (feed.jobType === "FIXED") variants.push(fixed);
@@ -117,9 +120,11 @@ export async function fetchFeedMcp(feed: SavedSearch, opts: { isKnown: (id: stri
   for (const params of variants) {
     let cursor: string | undefined;
     for (let page = 0; page < opts.maxPages; page++) {
-      const r = await callTool<SearchResp>("find_jobs", "search", { ...params, ...(cursor ? { cursor } : {}) });
+      // Only the feed's first call is paced by category; follow-up pages and variants of the same fetch are not.
+      const first = !out.size && params === variants[0] && page === 0;
+      const r = await callTool<SearchResp>("find_jobs", "search", { ...params, ...(cursor ? { cursor } : {}) }, { meta: { feed: true, ...(first ? { category: `feed:${feed.id}` } : {}) } });
       const rows = (r.jobs ?? []).map(mapRow);
-      rows.forEach((j) => out.set(j.id, j));
+      rows.filter(rateOk).forEach((j) => out.set(j.id, j));
       cursor = r.pageInfo?.hasNextPage ? r.pageInfo.endCursor : undefined;
       if (!cursor || !rows.length) break;
       const known = await Promise.all(rows.map((j) => opts.isKnown(j.id)));
@@ -158,6 +163,13 @@ export function mapDetail(r: Obj): { enrichment: JobEnrichment; patch: Partial<J
     subcategory: p.classification?.subCategory?.preferredLabel ?? null,
     clientState: p.clientCompanyPublic?.state ?? null,
     clientTimezone: p.clientCompanyPublic?.timezone ?? null,
+    // Not documented by the connector today; read it if it ever appears so "new client" can be judged by account age.
+    clientSince: p.clientCompanyPublic?.creationDate ?? p.clientCompanyPublic?.memberSince ?? rec.member_since ?? null,
+    // Not documented by the connector; read under any of the names Upwork uses so the writer sees them if present.
+    attachments: arr(p.attachments ?? p.content?.attachments ?? r.attachments, "attachments", "files").map((a) => ({
+      name: String(a.name ?? a.fileName ?? a.title ?? "attachment"),
+      url: (a.link ?? a.url ?? a.downloadUrl ?? a.uri ?? null) as string | null,
+    })),
     clientId: p.clientCompanyPublic?.id != null ? String(p.clientCompanyPublic.id) : null,
     record: {
       hires: n(rec.jobs_with_hires),

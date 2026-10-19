@@ -1,4 +1,5 @@
 import type { ClientIntent, IntentArchetype, Job, JobEnrichment, LlmRanking } from "../types";
+import { isNewClient, knownHireRate, knownHires, NEW_CLIENT_DAYS } from "./rules";
 
 /*
  * Hire likelihood / ghost risk - ADVISORY. It never changes the rank (`score.total`) or David's rules
@@ -37,9 +38,10 @@ export function assessIntent(job: Job, e: JobEnrichment | null | undefined, ctx:
   const text = `${job.title}\n${e?.description || job.description}`;
   const r = e?.record;
   const spend = r?.totalSpent ?? job.client.totalSpent ?? 0;
-  const hires = r?.hires ?? job.client.totalHires ?? 0;
+  const hiresKnown = knownHires(job, e); // null: the search row had no hire count (never read as "0 hires")
+  const hires = hiresKnown ?? 0;
   const posted = r?.jobsPosted ?? job.client.totalPostedJobs ?? 0;
-  const hireRate = r?.hireRatePercent ?? (posted > 0 ? Math.round((hires / posted) * 100) : null);
+  const hireRate = knownHireRate(job, e);
   const open = r?.openJobs ?? null;
   const ageH = (now.getTime() - new Date(job.publishedAt).getTime()) / 36e5;
 
@@ -49,7 +51,7 @@ export function assessIntent(job: Job, e: JobEnrichment | null | undefined, ctx:
   const hit = (a: IntentArchetype, w: number, why: string, penalty: number) => { hits.push({ a, w }); evidence.push(why); score -= penalty; };
 
   // ---- positive history ----
-  if (hires > 0 && hireRate != null) score += (hireRate - 50) / 2;
+  if (hiresKnown != null && hires > 0 && hireRate != null) score += (hireRate - 50) / 2;
   if (spend > 0) score += Math.min(15, Math.log10(spend + 1) * 3);
   if ((r?.feedbackScore ?? job.client.totalFeedback) >= 4.5 && (r?.feedbackCount ?? job.client.totalReviews) >= 5) score += 5;
   const starts = (e?.workHistory ?? []).map((w) => (w.started ? new Date(w.started).getTime() : 0)).filter(Boolean);
@@ -58,7 +60,7 @@ export function assessIntent(job: Job, e: JobEnrichment | null | undefined, ctx:
   // ---- negative patterns ----
   if (spend === 0 && hires === 0) {
     if (posted >= 2) hit("ghost_poster", 3, `$0 spent: posted ${posted} jobs and never hired`, 45);
-    else { score -= 15; evidence.push(`New client: no hiring history yet (${posted || 1} job posted)`); } // unknown, not damning
+    else { score -= 15; evidence.push(isNewClient(e, now) ? `New client: account created ≤ ${NEW_CLIENT_DAYS} days ago, no hires yet` : `No hiring history: $0 spent, 0 hires (${posted || 1} job posted)`); } // unknown, not damning
   }
   if (job.client.paymentVerified === false && hires === 0) hit("unfunded", 3, "No payment method attached and no hiring history", 25);
   if (posted >= 100 && hireRate != null && hireRate < 20) hit("mass_poster", 2, `${posted} jobs posted, only ${hireRate}% hired`, 25);

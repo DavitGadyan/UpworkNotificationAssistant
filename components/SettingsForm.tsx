@@ -5,7 +5,15 @@ import { useState } from "react";
 import { IconCheck, IconPhone, IconSend } from "@/components/icons";
 import { LlmSpend } from "@/components/LlmSpend";
 import { TelegramHelper } from "@/components/settings/TelegramHelper";
+import { UpworkConnection } from "@/components/settings/UpworkConnection";
 import type { CallMode, RankingRules, Settings } from "@/lib/types";
+
+/** Peak-window time zones: a fixed list (same on server and browser), the current value is always kept. */
+const TIMEZONES = [
+  "Asia/Yerevan", "Asia/Dubai", "Asia/Tbilisi", "Europe/Moscow", "Europe/Istanbul", "Europe/Kyiv", "Europe/Athens", "Europe/Berlin", "Europe/Paris",
+  "Europe/London", "UTC", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "America/Toronto",
+  "America/Sao_Paulo", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney",
+];
 
 const MODEL_RE = /^claude-[a-z0-9-]+$/;
 
@@ -41,6 +49,8 @@ export function SettingsForm({ initial, timezones, configured }: {
   const llm = s.llm as LlmSettings;
   const ad = (s as Settings & { autoDraft?: Settings["autoDraft"] }).autoDraft ?? { enabled: true, minRank: 60, dailyCap: 10, perCycle: 3, webSearch: true };
   const setAd = (patch: Partial<Settings["autoDraft"]>) => setS({ ...s, autoDraft: { ...ad, ...patch } });
+  const setAa = (patch: Partial<Settings["autoApply"]>) => setS({ ...s, autoApply: { ...s.autoApply, ...patch } });
+  const setPeak = (patch: Partial<Settings["upwork"]["peak"]>) => setS({ ...s, upwork: { ...s.upwork, peak: { ...s.upwork.peak, ...patch } } });
   const setLlm = (patch: Partial<LlmSettings>) => setS({ ...s, llm: { ...llm, ...patch } as Settings["llm"] });
   const modelErr = [llm.rankingModel, llm.writerModel].some((m) => !MODEL_RE.test(m));
 
@@ -155,20 +165,36 @@ export function SettingsForm({ initial, timezones, configured }: {
       {/* Ban-safety */}
       <section className="card min-w-0 p-5 md:p-6" aria-labelledby="poll">
         <h2 id="poll" className="display text-[20px] font-semibold">Ban-safety limits</h2>
-        <p className="mt-1 text-[14px] text-[var(--color-muted)]">Keeps usage human-paced: a slow, jittered poll, a gap between calls and hard caps per cycle and per day. When a cap is hit, the worker simply waits.</p>
+        <p className="mt-1 text-[14px] text-[var(--color-muted)]">Upwork restricted search twice (Oct 15 and 17) for too many calls. Every call now goes through the pacing governor: one searcher, at most 2,800 calls a day, automatic slow-down at the first warning, and a full stop on &ldquo;restricted&rdquo; until you resume it.</p>
         <div className="mt-5 grid gap-4">
-          <label className="field"><span>Data source</span>
-            <select className="input" value={s.source} onChange={(e) => setS({ ...s, source: e.target.value as Settings["source"] })}>
-              <option value="auto">Auto (MCP connector when connected, else API key)</option>
-              <option value="mcp">Upwork MCP connector only</option>
-              <option value="graphql">GraphQL API key only</option>
+          <label className="field"><span>Who searches Upwork</span>
+            <select className="input" value={s.upwork.poller} onChange={(e) => setS({ ...s, upwork: { ...s.upwork, poller: e.target.value as Settings["upwork"]["poller"] } })}>
+              <option value="chat">This Claude session (chat watch loop) - worker never searches</option>
+              <option value="worker">Worker - the chat watch loop is refused</option>
             </select></label>
+          <UpworkConnection value={s.source} onChange={(v) => setS({ ...s, source: v })} />
+          <fieldset className="grid gap-3 rounded-[14px] bg-[var(--color-sunken)] p-4">
+            <legend className="sr-only">Evening peak</legend>
+            <label className="flex items-center gap-3"><input type="checkbox" className="size-4" checked={s.upwork.peak.enabled} onChange={(e) => setPeak({ enabled: e.target.checked })} />Evening peak: search faster while high-value US clients post, slower the rest of the day</label>
+            <div className="grid grid-cols-2 gap-4">
+              <label className="field"><span>Peak starts</span><input className="input" type="time" value={s.upwork.peak.start} onChange={(e) => setPeak({ start: e.target.value })} /></label>
+              <label className="field"><span>Peak ends</span><input className="input" type="time" value={s.upwork.peak.end} onChange={(e) => setPeak({ end: e.target.value })} /></label>
+              <label className="field"><span>Time zone</span>
+                <select className="input" value={s.upwork.peak.timezone} onChange={(e) => setPeak({ timezone: e.target.value })}>
+                  {(TIMEZONES.includes(s.upwork.peak.timezone) ? TIMEZONES : [s.upwork.peak.timezone, ...TIMEZONES]).map((z) => <option key={z} value={z}>{z.replace(/_/g, " ")}</option>)}
+                </select></label>
+              <Num label="Peak: each feed every (min, 4–30)" min={4} max={30} value={s.upwork.peak.peakEveryMin} onChange={(v) => setPeak({ peakEveryMin: v })} />
+              <Num label="Off-peak: each feed every (min, 4–60)" min={4} max={60} value={s.upwork.peak.offPeakEveryMin} onChange={(v) => setPeak({ offPeakEveryMin: v })} />
+              <Num label="Budget kept for the peak (%, 0–90)" min={0} max={90} value={s.upwork.peak.reservePct} onChange={(v) => setPeak({ reservePct: v })} />
+            </div>
+            <label className="flex items-center gap-3"><input type="checkbox" className="size-4" checked={s.upwork.peak.learn} onChange={(e) => setPeak({ learn: e.target.checked })} />Learn: also treat hours where high-value jobs actually appear as peak (after 7 days of data)</label>
+          </fieldset>
           <div className="grid grid-cols-2 gap-4">
-            <Num label="Poll interval (s, 120–3600)" min={120} max={3600} step={30} value={s.pollIntervalSec} onChange={(v) => setS({ ...s, pollIntervalSec: v })} />
+            <Num label="Worker poll interval (s, 300–3600)" min={300} max={3600} step={30} value={s.pollIntervalSec} onChange={(v) => setS({ ...s, pollIntervalSec: v })} />
             <Num label="Random jitter (s, 0–300)" min={0} max={300} value={s.guard.jitterSec} onChange={(v) => setS({ ...s, guard: { ...s.guard, jitterSec: v } })} />
-            <Num label="Gap between calls (ms)" min={250} max={30000} step={250} value={s.guard.minGapMs} onChange={(v) => setS({ ...s, guard: { ...s.guard, minGapMs: v } })} />
-            <Num label="Client lookups per cycle" min={0} max={30} value={s.guard.maxEnrichPerCycle} onChange={(v) => setS({ ...s, guard: { ...s.guard, maxEnrichPerCycle: v } })} />
-            <Num label="Daily call cap (50–10,000)" min={50} max={10000} step={50} value={s.guard.dailyCallCap} onChange={(v) => setS({ ...s, guard: { ...s.guard, dailyCallCap: v } })} />
+            <Num label="Gap between calls (ms, ≥ 3000)" min={3000} max={30000} step={250} value={s.guard.minGapMs} onChange={(v) => setS({ ...s, guard: { ...s.guard, minGapMs: v } })} />
+            <Num label="Client lookups per cycle (0–10)" min={0} max={10} value={s.guard.maxEnrichPerCycle} onChange={(v) => setS({ ...s, guard: { ...s.guard, maxEnrichPerCycle: v } })} />
+            <Num label="Daily call cap (50–2,800)" min={50} max={2800} step={50} value={s.guard.dailyCallCap} onChange={(v) => setS({ ...s, guard: { ...s.guard, dailyCallCap: v } })} />
           </div>
           <label className="flex items-center gap-3"><input type="checkbox" className="size-4" checked={s.alertsPaused} onChange={(e) => setS({ ...s, alertsPaused: e.target.checked })} />Pause all alerts (jobs are still collected)</label>
         </div>
@@ -181,7 +207,7 @@ export function SettingsForm({ initial, timezones, configured }: {
         <div className="mt-5 grid gap-4">
           <label className="flex items-center gap-3"><input type="checkbox" className="size-4" checked={s.watch.enabled} onChange={(e) => setS({ ...s, watch: { ...s.watch, enabled: e.target.checked } })} />Watch alerted jobs</label>
           <div className="grid grid-cols-2 gap-4">
-            <Num label="Check every (min, 5–240)" min={5} max={240} value={s.watch.intervalMin} onChange={(v) => setS({ ...s, watch: { ...s.watch, intervalMin: v } })} />
+            <Num label="Check every (min, 30–240)" min={30} max={240} value={s.watch.intervalMin} onChange={(v) => setS({ ...s, watch: { ...s.watch, intervalMin: v } })} />
             <Num label="Stop after (hours, 1–336)" min={1} max={336} value={s.watch.maxHours} onChange={(v) => setS({ ...s, watch: { ...s.watch, maxHours: v } })} />
           </div>
           <p className="text-[13px] text-[var(--color-muted)]">Warning and drop thresholds live in Ranking rules (warn at {r.watchWarnAt}, drop above {r.maxProposals}).</p>
@@ -200,6 +226,31 @@ export function SettingsForm({ initial, timezones, configured }: {
             <Num label="Max drafts per cycle" min={0} max={10} value={ad.perCycle} onChange={(v) => setAd({ perCycle: v })} />
           </div>
           <label className="flex items-center gap-3"><input type="checkbox" className="size-4" checked={ad.webSearch} onChange={(e) => setAd({ webSearch: e.target.checked })} />Research the client company on the web (more accurate, slightly slower)</label>
+        </div>
+      </section>
+
+      {/* Night auto-apply */}
+      <section className="card min-w-0 p-5 md:p-6" aria-labelledby="autoapply">
+        <h2 id="autoapply" className="display text-[20px] font-semibold">Auto-apply at night</h2>
+        <p className="mt-1 text-[14px] text-[var(--color-muted)]">While you sleep, auto-drafted proposals for jobs that clear every bar below are <b>submitted to Upwork without a Loom video</b> and spend Connects. One per worker cycle, every one reported on Telegram. It never runs while Upwork calls are stopped. Proposals you approve yourself still need a Loom.</p>
+        <div className="mt-5 grid gap-4">
+          <label className="flex items-center gap-3"><input type="checkbox" className="size-4" checked={s.autoApply.enabled} onChange={(e) => setAa({ enabled: e.target.checked })} />Submit automatically during the night window</label>
+          <div className="grid grid-cols-2 gap-4">
+            <label className="field"><span>Night starts</span><input className="input" type="time" value={s.autoApply.start} onChange={(e) => setAa({ start: e.target.value })} /></label>
+            <label className="field"><span>Night ends</span><input className="input" type="time" value={s.autoApply.end} onChange={(e) => setAa({ end: e.target.value })} /></label>
+            <label className="field"><span>Time zone</span>
+              <select className="input" value={s.autoApply.timezone} onChange={(e) => setAa({ timezone: e.target.value })}>
+                {(TIMEZONES.includes(s.autoApply.timezone) ? TIMEZONES : [s.autoApply.timezone, ...TIMEZONES]).map((z) => <option key={z} value={z}>{z.replace(/_/g, " ")}</option>)}
+              </select></label>
+            <Num label="Max proposals per night (0–20)" min={0} max={20} value={s.autoApply.maxPerNight} onChange={(v) => setAa({ maxPerNight: v })} />
+            <Num label="Only jobs ranked ≥ (50–100)" min={50} max={100} value={s.autoApply.minRank} onChange={(v) => setAa({ minRank: v })} />
+            <Num label="And AI fit ≥ (50–100)" min={50} max={100} value={s.autoApply.minFit} onChange={(v) => setAa({ minFit: v })} />
+            <Num label="Fewer proposals than (1–20)" min={1} max={20} value={s.autoApply.maxProposals} onChange={(v) => setAa({ maxProposals: v })} />
+            <Num label="Max Connects per night (0–500)" min={0} max={500} value={s.autoApply.maxConnectsPerNight} onChange={(v) => setAa({ maxConnectsPerNight: v })} />
+            <Num label="Keep at least N Connects (0–1000)" min={0} max={1000} value={s.autoApply.minConnectsBalance} onChange={(v) => setAa({ minConnectsBalance: v })} />
+          </div>
+          <label className="flex items-center gap-3"><input type="checkbox" className="size-4" checked={s.autoApply.requireVerifiedPayment} onChange={(e) => setAa({ requireVerifiedPayment: e.target.checked })} />Only clients with verified payment</label>
+          <p className="text-[13px] text-[var(--color-muted)]">Needs Auto proposal drafts on - auto-apply only sends drafts that already exist. If Upwork&apos;s preview shows no Connects cost, the proposal is held for you instead of sent.</p>
         </div>
       </section>
 

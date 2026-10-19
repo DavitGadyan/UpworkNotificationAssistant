@@ -7,7 +7,7 @@ export function JobsFilterBar({ searches }: { searches: { value: string; label: 
     <div id="job-filters" className="mb-5 flex flex-col gap-3 md:flex-row">
       <FilterSelect param="search" label="Search" icon={<IconGlobe size={20} />} options={searches} />
       <FilterSelect param="status" label="Status" icon={<IconAlert size={20} />} options={[
-        { value: "new", label: "New" }, { value: "awaiting_ai", label: "Waiting for AI" }, { value: "notified", label: "Notified" }, { value: "called", label: "Called" },
+        { value: "new", label: "New" }, { value: "awaiting_ai", label: "Waiting for AI" }, { value: "awaiting_payment", label: "Waiting for payment" }, { value: "notified", label: "Notified" }, { value: "called", label: "Called" },
         { value: "dismissed", label: "Dismissed" }, { value: "off", label: "Not my field" },
       ]} />
     </div>

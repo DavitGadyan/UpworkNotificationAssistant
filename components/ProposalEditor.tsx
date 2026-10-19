@@ -2,18 +2,36 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FeedbackButtons } from "@/components/FeedbackButtons";
 import { IconCheck, IconExternal, IconLink, IconRefresh, IconSend } from "@/components/icons";
 import { Bullets, Note, Spinner } from "@/components/ui/bits";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { CONTACT_ROLE_LABELS, fmtDateTime, PROPOSAL_STATUS, percentChanged } from "@/lib/format";
+import { findPlaceholders } from "@/lib/proposals/clean";
 import type { Proposal } from "@/lib/types";
 
 const LOOM_PLACEHOLDER = "{{LOOM_URL}}";
 // A loom.com link or a branded short link (Rebrandly…); the server follows redirects and checks it lands on Loom.
 const LOOM_RE = /^https:\/\/[^\s/]+\.[^\s/]+\/\S+$/;
 const MAX = 5000;
+const AUTOSAVE_MS = 1200;
+const cacheKey = (id: number) => `proposal-draft:${id}`;
+type Answer = { question: string; answer: string };
+interface Cached { cover: string; answers: Answer[]; bid: string; duration: string; savedAt: number }
+type SaveState = "idle" | "saving" | "saved" | "retrying";
+
+// Browser copy of unsaved edits, so a closed tab or a dropped connection never loses text (per browser, best effort).
+const readCache = (id: number): Cached | null => { try { const v = localStorage.getItem(cacheKey(id)); return v ? (JSON.parse(v) as Cached) : null; } catch { return null; } };
+const writeCache = (id: number, c: Cached) => { try { localStorage.setItem(cacheKey(id), JSON.stringify(c)); } catch { /* storage full or blocked */ } };
+const clearCache = (id: number) => { try { localStorage.removeItem(cacheKey(id)); } catch { /* blocked */ } };
+
+/** Red line under a field that still has a note to David or a fill-in slot - the client must never see it. */
+function PlaceholderWarning({ text }: { text: string }) {
+  const found = findPlaceholders(text);
+  if (!found.length) return null;
+  return <p role="alert" className="mt-1.5 text-[13px] text-[var(--color-bad)]">Remove before sending: {found.map((f) => `"${f.length > 60 ? `${f.slice(0, 57)}…` : f}"`).join(", ")}</p>;
+}
 
 type Action = "save" | "loom" | "approve" | "preview" | "submit" | "discard" | "rewrite";
 
@@ -34,12 +52,93 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
   const [ok, setOk] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState("");
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [restored, setRestored] = useState<Cached | null>(null);
 
+  const serverAnswers = useCallback((x: Proposal) => (x.answers.length ? x.answers : screeningQuestions.map((q) => ({ question: q, answer: "" }))), [screeningQuestions]);
   const dirty = cover !== p.coverLetter
-    || JSON.stringify(answers) !== JSON.stringify(p.answers.length ? p.answers : screeningQuestions.map((q) => ({ question: q, answer: "" })))
+    || JSON.stringify(answers) !== JSON.stringify(serverAnswers(p))
     || bid !== (p.bid != null ? String(p.bid) : "")
     || duration !== (p.estimatedDuration ?? "");
   const locked = p.status === "submitted" || p.status === "discarded";
+  const bidValid = bid === "" || Number.isFinite(Number(bid));
+
+  // ---------- autosave ----------
+  const seq = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const retries = useRef(0);
+  const latest = useRef({ cover, answers, bid, duration, dirty, locked, bidValid });
+  latest.current = { cover, answers, bid, duration, dirty, locked, bidValid };
+  const inflight = useRef<Promise<boolean> | null>(null);
+
+  const patchBody = () => {
+    const l = latest.current;
+    return JSON.stringify({ coverLetter: l.cover, answers: l.answers, bid: l.bid === "" ? null : Number(l.bid), estimatedDuration: l.duration });
+  };
+  /** Save what is on screen now. Only the server copy is updated, never the text boxes, so typing is never overwritten. */
+  const saveNow = useCallback(async (opts: { keepalive?: boolean } = {}): Promise<boolean> => {
+    const l = latest.current;
+    if (!l.dirty || l.locked || !l.bidValid) return true;
+    clearTimeout(timer.current);
+    const mine = ++seq.current;
+    setSaveState("saving");
+    const run = (async () => {
+      try {
+        const res = await fetch(`/api/proposals/${p.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: patchBody(), keepalive: opts.keepalive });
+        const body = (await res.json().catch(() => ({}))) as Proposal & { error?: string };
+        if (!res.ok) throw new Error(body.error ?? `Save failed (${res.status})`);
+        if (mine !== seq.current) return true; // a newer save is on its way
+        setP(body); retries.current = 0; setSaveError(null); setSaveState("saved");
+        if (body.coverLetter === latest.current.cover) clearCache(p.id);
+        return true;
+      } catch (e) {
+        if (mine !== seq.current) return false;
+        setSaveError((e as Error).message); setSaveState("retrying");
+        const wait = Math.min(30_000, 2_000 * 2 ** retries.current++);
+        timer.current = setTimeout(() => { void saveNow(); }, wait);
+        return false;
+      }
+    })();
+    inflight.current = run;
+    return run;
+  }, [p.id]);
+
+  // Every change: keep a browser copy at once, save to the server a moment after typing stops.
+  useEffect(() => {
+    if (locked || !dirty) return;
+    writeCache(p.id, { cover, answers, bid, duration, savedAt: Date.now() });
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => { void saveNow(); }, AUTOSAVE_MS);
+    return () => clearTimeout(timer.current);
+  }, [cover, answers, bid, duration]);
+
+  // Leaving or hiding the tab: save straight away (keepalive lets the request finish after the page closes).
+  useEffect(() => {
+    const flush = () => { if (latest.current.dirty) void saveNow({ keepalive: true }); };
+    const onHide = () => { if (document.visibilityState === "hidden") flush(); };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onHide);
+    return () => { window.removeEventListener("pagehide", flush); document.removeEventListener("visibilitychange", onHide); };
+  }, [saveNow]);
+
+  // On open: bring back edits this browser kept that never reached the server.
+  useEffect(() => {
+    const c = readCache(initial.id);
+    if (!c || locked) return;
+    const same = c.cover === initial.coverLetter && JSON.stringify(c.answers) === JSON.stringify(serverAnswers(initial))
+      && c.bid === (initial.bid != null ? String(initial.bid) : "") && c.duration === (initial.estimatedDuration ?? "");
+    if (same || c.savedAt <= Date.parse(initial.updatedAt)) { clearCache(initial.id); return; }
+    setCover(c.cover); setAnswers(c.answers.map((a) => ({ ...a }))); setBid(c.bid); setDuration(c.duration);
+    setRestored(c);
+  }, []);
+  const undoRestore = () => {
+    setCover(p.coverLetter); setAnswers(serverAnswers(p).map((a) => ({ ...a })));
+    setBid(p.bid != null ? String(p.bid) : ""); setDuration(p.estimatedDuration ?? "");
+    clearCache(p.id); setRestored(null);
+  };
+  /** Before approve / preview / rewrite: make sure the server has exactly what is on screen. */
+  const flushSave = async () => { if (inflight.current) await inflight.current; return latest.current.dirty ? saveNow() : true; };
   const changed = useMemo(() => percentChanged(p.originalDraft.replaceAll(LOOM_PLACEHOLDER, p.loomUrl ?? LOOM_PLACEHOLDER), cover), [p.originalDraft, p.loomUrl, cover]);
 
   const call = async (at: Action, url: string, init: RequestInit, done?: string) => {
@@ -51,6 +150,7 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
       setP(body); setCover(body.coverLetter); setLoom(body.loomUrl ?? "");
       if (body.answers.length) setAnswers(body.answers.map((a) => ({ ...a })));
       setBid(body.bid != null ? String(body.bid) : ""); setDuration(body.estimatedDuration ?? "");
+      clearCache(body.id); setRestored(null);
       if (done) setOk(done);
       router.refresh();
       return true;
@@ -61,16 +161,16 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
       setBusy(null);
     }
   };
-  const save = () => call("save", `/api/proposals/${p.id}`, {
-    method: "PATCH",
-    body: JSON.stringify({ coverLetter: cover, answers, bid: bid === "" ? null : Number(bid), estimatedDuration: duration }),
-  }, p.status === "approved" || p.status === "previewed" ? "Saved. Editing after approval needs a new approval and preview." : "Saved");
   // Restructures the draft to ≤ 900 chars server-side (~30-60s). No body; returns the updated proposal.
-  const rewrite = () => {
-    if (dirty && !confirm("Rewriting replaces your unsaved edits. Continue?")) return;
+  const rewrite = async () => {
+    if (!confirm("Rewriting replaces the current text with a shorter version. Continue?")) return;
+    await flushSave();
     call("rewrite", `/api/proposals/${p.id}/rewrite`, { method: "POST" }, "Rewritten shorter");
   };
-  const act = (a: Exclude<Action, "save" | "rewrite">, body?: object, done?: string) => call(a, `/api/proposals/${p.id}/${a}`, { method: "POST", body: JSON.stringify(body ?? {}) }, done);
+  const act = async (a: Exclude<Action, "save" | "rewrite">, body?: object, done?: string) => {
+    if (a !== "discard" && !(await flushSave())) { setError({ at: a, msg: "Your latest edits are not saved yet - check the connection and try again." }); return false; }
+    return call(a, `/api/proposals/${p.id}/${a}`, { method: "POST", body: JSON.stringify(body ?? {}) }, done);
+  };
 
   // Stepper
   const has = (...s: Proposal["status"][]) => s.includes(p.status);
@@ -133,11 +233,16 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
             {busy === "rewrite" && <p className="mt-3 text-[13px] text-[var(--color-muted)]" aria-live="polite">Rewriting - this usually takes 30 to 60 seconds.</p>}
             {err("rewrite")}
             {ok === "Rewritten shorter" && busy === null && <p className="mt-3 inline-flex items-center gap-1.5 text-[14px] text-[var(--color-good)]"><IconCheck size={16} />Rewritten shorter. Review it, then save or approve as usual.</p>}
+            {restored && (
+              <Note tone="warn" className="mt-3">Restored edits this browser kept from {fmtDateTime(new Date(restored.savedAt).toISOString())} that never reached the server. They save now.{" "}
+                <button type="button" className="underline" onClick={undoRestore}>Undo</button></Note>
+            )}
             {cover.includes(LOOM_PLACEHOLDER) && <Note tone="warn" className="mt-3">The letter still contains the {LOOM_PLACEHOLDER} placeholder. Attaching your Loom link replaces it.</Note>}
             <textarea
               aria-label="Cover letter" className="input mt-4 min-h-[340px] py-3 leading-relaxed md:min-h-[440px]" value={cover} maxLength={MAX} disabled={locked}
               onChange={(e) => setCover(e.target.value)}
             />
+            <PlaceholderWarning text={cover} />
             <p className={`num mt-1.5 text-right text-[13px] ${cover.length > MAX * 0.95 ? "text-[var(--color-bad)]" : "text-[var(--color-muted)]"}`}>{cover.length.toLocaleString()} / {MAX.toLocaleString()}</p>
           </section>
 
@@ -150,6 +255,7 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
                     <span className="text-[14px] text-[var(--color-ink)]">{i + 1}. {a.question}</span>
                     <textarea className="input min-h-[110px] py-3 leading-relaxed" value={a.answer} disabled={locked}
                       onChange={(e) => setAnswers(answers.map((x, j) => (j === i ? { ...x, answer: e.target.value } : x)))} />
+                    <PlaceholderWarning text={a.answer} />
                   </label>
                 ))}
               </div>
@@ -160,7 +266,8 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
             <h2 id="terms-h" className="display text-[20px] font-semibold">Terms</h2>
             <div className="mt-4 grid grid-cols-2 gap-4">
               <label className="field"><span>Bid ($, hourly rate or fixed total)</span>
-                <input className="input num" type="number" min="0" step="1" inputMode="decimal" value={bid} disabled={locked} onChange={(e) => setBid(e.target.value)} placeholder="e.g. 120" /></label>
+                <input className="input num" type="number" min="0" step="1" inputMode="decimal" value={bid} disabled={locked} onChange={(e) => setBid(e.target.value)} placeholder="e.g. 120" />
+                {!bidValid && <span className="text-[13px] text-[var(--color-bad)]">Enter a number</span>}</label>
               <label className="field"><span>Estimated duration</span>
                 <input className="input" value={duration} disabled={locked} onChange={(e) => setDuration(e.target.value)} placeholder="e.g. 1 to 3 months" /></label>
             </div>
@@ -168,11 +275,12 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
           </section>
 
           {!locked && (
-            <div className={`${dirty ? "sticky bottom-[96px] md:bottom-4" : ""} z-10 flex flex-wrap items-center gap-3 rounded-[16px] border border-[var(--color-line)] bg-[var(--color-surface)]/95 p-3 backdrop-blur`}>
-              <button type="button" className="btn btn-dark" disabled={!dirty || busy === "save"} onClick={save}>{busy === "save" ? <><Spinner />Saving…</> : "Save changes"}</button>
-              {dirty ? <span className="text-[14px] text-[var(--color-warn)]">Unsaved changes</span> : ok ? <span className="inline-flex items-center gap-1.5 text-[14px] text-[var(--color-good)]"><IconCheck size={16} />{ok}</span> : <span className="text-[14px] text-[var(--color-muted)]">All changes saved</span>}
-              {error?.at === "save" && <span role="alert" className="w-full text-[14px] text-[var(--color-bad)]">{error.msg}</span>}
-            </div>
+            <div className="flex flex-wrap items-center gap-2 rounded-[16px] border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-[14px]" aria-live="polite">
+              {saveState === "saving" || (dirty && saveState !== "retrying")
+                ? <span className="inline-flex items-center gap-1.5 text-[var(--color-muted)]"><Spinner />Saving…</span>
+                : saveState === "retrying"
+                  ? <span className="text-[var(--color-warn)]">Not saved yet - kept in this browser, retrying. {saveError}</span>
+                  : <span className="inline-flex items-center gap-1.5 text-[var(--color-good)]"><IconCheck size={16} />All changes saved</span>}            </div>
           )}
         </div>
 
@@ -202,10 +310,10 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
             {/* 2. Approve */}
             <div className="mt-4 border-t border-[var(--color-line)] pt-4">
               <p className="flex items-center gap-2 font-medium"><Num n={2} done={has("approved", "previewed", "submitted")} />Approve the final text</p>
-              <button type="button" className="btn btn-sm mt-3" disabled={locked || !p.loomUrl || dirty || p.status !== "ready" || busy === "approve"} onClick={() => act("approve", undefined, "Approved")}>
+              <button type="button" className="btn btn-sm mt-3" disabled={locked || !p.loomUrl || p.status !== "ready" || busy === "approve"} onClick={() => act("approve", undefined, "Approved")}>
                 {busy === "approve" ? <Spinner /> : <IconCheck size={16} />}{has("approved", "previewed") ? `Approved ${p.approvedAt ? fmtDateTime(p.approvedAt) : ""}` : "Approve"}
               </button>
-              <p className="mt-2 text-[13px] text-[var(--color-muted)]">{!p.loomUrl ? "Attach the Loom first." : dirty ? "Save your edits first." : p.status === "ready" ? "Approving records how much you edited the draft." : ""}</p>
+              <p className="mt-2 text-[13px] text-[var(--color-muted)]">{!p.loomUrl ? "Attach the Loom first." : p.status === "ready" ? "Approving saves your latest edits first and records how much you edited the draft." : ""}</p>
               {err("approve")}
             </div>
 

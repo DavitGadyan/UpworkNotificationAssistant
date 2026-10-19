@@ -1,6 +1,6 @@
 # How jobs are ranked
 
-Every 4 minutes (± 30 s) the worker reads your three Upwork feeds through the official MCP connector: Most Recent, Best Matches and your saved search. Each new job goes through these steps in order.
+Your Upwork feeds (Most Recent, Best Matches, your saved search and the keyword search) are read through the official MCP connector by the selected searcher (Settings → Who searches Upwork), each at most every 5 minutes, paced by the governor (`lib/upwork/governor.ts`). Each new job goes through these steps in order.
 
 ## 0. Is it your field? (`lib/ranking/profileFit.ts`)
 A free check on Upwork's skill tags, the title and Upwork's category, before anything else:
@@ -18,7 +18,7 @@ A free check on Upwork's skill tags, the title and Upwork's category, before any
 
 ## 2. Client record first
 Before the job is judged, `find_jobs get` loads the client's record: hire rate, total spent, hours, open jobs, recent contracts and reviews.
-- If the record can't be loaded (Upwork error or too many requests), the job waits as **"Checking client…"** and is retried next cycle.
+- If the record can't be loaded (Upwork error or too many requests), the job waits as **"Checking client…"** and is retried in a later cycle (a job is opened at most once per 6 h and never again after Upwork refuses it; job opens are capped at 120 a day).
 - A job is never ranked or alerted on feed data alone.
 - Upwork doesn't show per-contract rates, so **average paid ≈ total spent ÷ total hours**. Fixed-price spend inflates this, so it's an upper estimate.
 

@@ -107,13 +107,15 @@ export const endpoints = {
   },
   draft: (jobId: string, body: { guidance?: string; webSearch?: boolean }) =>
     api<Proposal>(`/api/jobs/${encodeURIComponent(jobId)}/draft`, { method: "POST", body, timeoutMs: 300_000 }),
-  editProposal: (id: number, body: { coverLetter: string; answers: { question: string; answer: string }[]; bid: number | null }) =>
+  editProposal: (id: number, body: { coverLetter: string; answers: { question: string; answer: string }[]; bid: number | null; estimatedDuration?: string }) =>
     api<Proposal>(`/api/proposals/${id}`, { method: "PATCH", body }),
   loom: (id: number, url: string) => api<Proposal>(`/api/proposals/${id}/loom`, { method: "POST", body: { url } }),
   approve: (id: number) => api<Proposal>(`/api/proposals/${id}/approve`, { method: "POST", body: {} }),
   preview: (id: number) => api<Proposal>(`/api/proposals/${id}/preview`, { method: "POST", body: {}, timeoutMs: 120_000 }),
   submit: (id: number) => api<Proposal>(`/api/proposals/${id}/submit`, { method: "POST", body: { confirm: "SUBMIT" }, timeoutMs: 120_000 }),
   discard: (id: number) => api<Proposal>(`/api/proposals/${id}/discard`, { method: "POST", body: {} }),
+  /** Copy-and-paste route: David sent it on Upwork himself. Records it only - no Upwork call. */
+  markApplied: (id: number) => api<Proposal>(`/api/proposals/${id}/applied`, { method: "POST", body: {} }),
   /** "Rewrite shorter": restructures the draft to ≤ 900 chars server-side. No body; ~30-60s. */
   rewrite: (id: number) => api<Proposal>(`/api/proposals/${id}/rewrite`, { method: "POST", timeoutMs: 180_000 }),
   closer: (body: { jobId?: string; roomId?: string; thread?: string; country?: string; clientName?: string; goal?: string }) =>
@@ -136,7 +138,7 @@ async function demoApi<T>(path: string, method: string, body: unknown): Promise<
   if (m) {
     const p = demo.demoProposals.find((x) => x.id === Number(m[1]));
     if (!p) throw new ApiError("Proposal not found", 404);
-    const next = { loom: "ready", approve: "approved", preview: "previewed", submit: "submitted", discard: "discarded" } as const;
+    const next = { loom: "ready", approve: "approved", preview: "previewed", submit: "submitted", applied: "submitted", discard: "discarded" } as const;
     if (m[2] === "rewrite") {
       await sleep(1500);
       p.data = { ...p.data, coverLetter: p.data.coverLetter.slice(0, 900) };

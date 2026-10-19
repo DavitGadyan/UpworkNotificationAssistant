@@ -3,6 +3,7 @@ import { editJobAlert, sendText } from "./notify/telegram";
 import { scoreJob } from "./scoring";
 import type { CachedJob, Job } from "./types";
 import { mapRow, mergeDetail } from "./upwork/mcp/jobs";
+import { GuardError } from "./upwork/guard";
 import { callTool } from "./upwork/mcp/client";
 import { fetchDetail } from "./upwork/source";
 import { proposalsLow } from "./upwork/tiers";
@@ -34,7 +35,7 @@ export async function applyFeedCounts(jobs: Job[]) {
 }
 
 /** Look the job up in a ±2 min Most Recent window around its publish time (one call, returns the count). */
-async function countFromFeed(job: CachedJob): Promise<Job | null> {
+export async function countFromFeed(job: CachedJob): Promise<Job | null> {
   const t = new Date(job.publishedAt).getTime();
   const r = await callTool<{ jobs?: Record<string, unknown>[] }>("find_jobs", "smart_search", {
     mode: "most_recent", from_date: new Date(t - 120_000).toISOString(), to_date: new Date(t + 120_000).toISOString(), limit: 10,
@@ -55,15 +56,22 @@ export async function checkWatch(w: WatchRow, now = new Date()): Promise<string>
   try {
     const row = await countFromFeed(job);
     if (row) current = row;
-  } catch (e) { console.warn("watch count failed", job.id, (e as Error).message); }
+  } catch (e) {
+    if (e instanceof GuardError) throw e; // restricted / throttled / budget: stop all watches this cycle
+    console.warn("watch count failed", job.id, (e as Error).message);
+  }
 
-  // 2) liveness + client activity (closed? hired? ignored?)
+  // 2) liveness + client activity (closed? hired? ignored?). The governor refuses a job it opened < 6 h ago or
+  // that Upwork refused once, so a refused job is never re-opened - the watch carries on with the count only.
   let enrichment = job.enrichment ?? null;
   let merged: Job = { ...job, totalApplicants: current.totalApplicants, proposalsTier: current.proposalsTier ?? null };
   try {
     const d = await fetchDetail(job.id);
     if (d) { enrichment = d.enrichment; merged = mergeDetail(merged, d.patch, d.enrichment); }
-  } catch (e) { console.warn("watch detail failed", job.id, (e as Error).message); }
+  } catch (e) {
+    if (e instanceof GuardError) throw e;
+    console.warn("watch detail failed", job.id, (e as Error).message);
+  }
 
   const search = (await listSearches()).find((x) => x.id === job.searchId);
   const score = search ? scoreJob(merged, search, now, rules, { enrichment, llm: job.score.llm ?? null }) : job.score;

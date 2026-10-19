@@ -64,8 +64,8 @@ export function DraftPanel({ jobId, highlight = false, existing = 0 }: { jobId: 
       {(open || busy) && (
         <div className="mt-5 grid gap-4">
           <label className="field"><span>Guidance for the writer (optional)</span>
-            <textarea className="input min-h-[96px] py-3" value={guidance} onChange={(e) => setGuidance(e.target.value)} disabled={busy} maxLength={2000}
-              placeholder="e.g. Lead with the RAG pipeline I built for a legal client; propose a paid discovery week." />
+            <textarea className="input min-h-[96px] py-3" value={guidance} onChange={(e) => setGuidance(e.target.value)} disabled={busy} maxLength={20000}
+              placeholder="e.g. Lead with the RAG pipeline I built for a legal client; propose a paid discovery week. Paste the text of any files attached to the job post here so the writer has the full brief." />
           </label>
           <label className="flex items-center gap-3 text-[15px]"><input type="checkbox" className="size-4" checked={web} disabled={busy} onChange={(e) => setWeb(e.target.checked)} />Research the client on the web (slower, finds company and contact)</label>
           <div className="flex flex-wrap items-center gap-3">

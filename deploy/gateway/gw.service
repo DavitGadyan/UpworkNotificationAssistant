@@ -1,0 +1,23 @@
+# /etc/systemd/system/gw.service - the Upwork API gateway (gateway/server.ts) on the GCP VM.
+[Unit]
+Description=gw - official Upwork API gateway (OAuth callback + GraphQL proxy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=gw
+Group=gw
+WorkingDirectory=/opt/gw
+EnvironmentFile=/etc/gw.env
+ExecStart=/usr/bin/node /opt/gw/server.ts
+Restart=always
+RestartSec=5
+StateDirectory=gw
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/gw
+
+[Install]
+WantedBy=multi-user.target

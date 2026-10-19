@@ -20,7 +20,7 @@ export default async function Feeds() {
   }));
   return (
     <>
-      <PageHead title="Feeds" subtitle={`${searches.length} of 10 feeds. Each active feed is polled about every ${Math.round(settings.pollIntervalSec / 60)} minutes (with a little random jitter).`}
+      <PageHead title="Feeds" subtitle={`${searches.length} of 10 feeds. Active feeds are searched by the selected searcher (Settings → Who searches Upwork), each at most every ${Math.round(settings.pollIntervalSec / 60)} minutes, paced by the governor.`}
         actions={<Link href="/feeds?new=1" className="btn btn-dark"><IconPlus size={18} />New feed</Link>} />
       <FeedImport />
       <Suspense><SearchesList searches={searches} stats={stats} /></Suspense>

@@ -40,12 +40,22 @@ describe("hard rejects", () => {
 describe("red flags", () => {
   it("flags unverified payment red, but forgives a brand-new client on a very tight fit", () => {
     const irish = mapRow(irishDataRow);
-    const plain = evaluateRules(irish, R, { now, enrichment: enr({}, { hires: 0, hours: 0, contractsTotal: 0, totalSpent: 0, hireRatePercent: null }) });
+    const noHistory = { hires: 0, hours: 0, contractsTotal: 0, totalSpent: 0, hireRatePercent: null };
+    const plain = evaluateRules(irish, R, { now, enrichment: enr({ clientSince: "2026-10-12T09:00:00Z" }, noHistory) });
     expect(plain.flags.find((f) => f.code === "unverified")?.severity).toBe("red");
-    const forgiven = evaluateRules(irish, R, { now, llm: llm(90), enrichment: enr({}, { hires: 0, hours: 0, contractsTotal: 0, totalSpent: 0, hireRatePercent: null }) });
+    const forgiven = evaluateRules(irish, R, { now, llm: llm(90), enrichment: enr({ clientSince: "2026-10-12T09:00:00Z" }, noHistory) });
     expect(forgiven.flags.some((f) => f.code === "unverified")).toBe(false);
     expect(forgiven.flags.some((f) => f.code === "unverified_new")).toBe(true);
     expect(forgiven.score).toBeGreaterThan(plain.score);
+  });
+  it("never calls a client new on zero hires alone - only an account at most 2 days old", () => {
+    const irish = mapRow(irishDataRow);
+    const noHistory = { hires: 0, hours: 0, contractsTotal: 0, totalSpent: 0, hireRatePercent: null };
+    for (const clientSince of [null, "2025-08-13T00:00:00Z", "2026-10-10T00:00:00Z"]) { // unknown, 14 months, 3 days
+      const r = evaluateRules(irish, R, { now, llm: llm(90), enrichment: enr({ clientSince }, noHistory) });
+      expect(r.flags.find((f) => f.code === "unverified")?.severity).toBe("red");
+      expect(r.flags.some((f) => f.code === "unverified_new")).toBe(false);
+    }
   });
   it("flags cheap-labour agencies and clients who mostly post tiny jobs", () => {
     const cheap = evaluateRules(job(), R, { now, enrichment: enr({}, { totalSpent: 30_000, hours: 2_000 }) }); // ≈$15/hr
@@ -61,6 +71,11 @@ describe("red flags", () => {
     expect(detectCategory(ops)).toBe("devops");
     expect(evaluateRules(ops, R, { now, enrichment: enr({}, { hireRatePercent: 78 }) }).flags.some((f) => f.code === "hire_rate")).toBe(false);
     expect(evaluateRules(ops, R, { now, enrichment: enr({}, { hireRatePercent: 70 }) }).flags.find((f) => f.code === "hire_rate")?.severity).toBe("red");
+  });
+  it("treats AIOps, LLMOps and AI deployment work as MLOps", () => {
+    for (const title of ["AIOps engineer for incident automation", "LLMOps: vLLM inference server on AWS", "AI deployment engineer (SageMaker)"]) {
+      expect(detectCategory(job({ title, skills: [], description: "" }))).toBe("mlops");
+    }
   });
   it("flags a client ignoring several open jobs for 2+ days", () => {
     const old = job({ publishedAt: "2026-10-10T00:00:00Z" });

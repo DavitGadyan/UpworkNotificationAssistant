@@ -39,7 +39,7 @@ The worker posts `⏰ Polling behind` / `✅ Polling recovered` to Telegram on i
    sudo systemctl daemon-reload && sudo systemctl enable --now up-assistant-healthping.timer
    systemctl list-timers | grep healthping
    ```
-`/api/health` returns 503 when the worker is stale or any feed has had no successful fetch for 12 minutes. In that case the timer pings `/fail` and you're told straight away; when the box is down, the missing ping tells you after about 20 minutes.
+`/api/health` returns 503 when the worker is stale or any feed has had no successful fetch for 15 minutes. In that case the timer pings `/fail` and you're told straight away; when the box is down, the missing ping tells you after about 20 minutes.
 
 ## Logs
 ```bash
@@ -83,16 +83,24 @@ Repeat 01-03, copy the same `.env`, stop the old box (`sudo systemctl disable --
 | Symptom | Likely cause → fix |
 |---|---|
 | Phone: "Home worker offline" | Worker down or no internet. Check `systemctl status up-assistant-worker`, `journalctl -u up-assistant-worker -n 100`, `ping -c3 1.1.1.1`. |
-| Log: `Standby - <host> is polling` that doesn't go away after 12 min | Another machine (`<host>`) still runs the worker. Stop it (04, step 2). If it's this box's old name, clear the lease (04, step 3). |
+| Log: `Standby - <host> is polling` that doesn't go away after 15 min | Another machine (`<host>`) still runs the worker. Stop it (04, step 2). If it's this box's old name, clear the lease (04, step 3). |
 | Log: `network blip (ignored): ENOTFOUND …` | A short DNS/Wi-Fi drop. Harmless if it's occasional. If constant: `resolvectl status`, or use a wired connection. |
-| Log: `query timed out after … s` | The Supabase pooler dropped a reply; the query is retried next loop. If it repeats, check `SUPABASE_DB_URL` uses port **6543**. |
+| Log: `query timed out after … s` | The Supabase pooler dropped a reply; the query is retried next loop. If it repeats, check the app is on the session pooler (port **5432**) and `DB_POOLER_MODE` is not set to `transaction`. |
 | Log: `Upwork login expired` / `Upwork is not connected` | Log in again (above). If it happens right after the move, `TOKEN_ENC_KEY` differs from the Mac's. |
 | Log: `Paused until … after repeated errors` | Upwork's circuit breaker (429/5xx). It resumes by itself after 30 min. Don't restart repeatedly: that doesn't bypass it. |
-| Log: `Daily cap of N Upwork calls reached` | The guard's daily cap (Settings → Upwork guard). Polling resumes the next day. Raise the cap only with care. |
+| Log: `Daily cap of N Upwork calls reached` | The governor's 24 h budget (≤ 2,800 calls, 1,400 searches, 60 job opens). It resumes as the 24 h window rolls. Never raise the limits. |
+| Telegram/log: Upwork **restricted** | See the runbook below. |
 | Telegram: 👍/👎 buttons do nothing | Another process (usually the Mac worker) is long-polling the same bot, and Telegram allows only one. Stop it (04, step 2). |
 | No alerts, but jobs show up in the app | Working as intended: your rules and the field gate hide most jobs, and with the AI on nothing is alerted on rules alone. Check the job's "why" in the app. AI budget: Settings → AI models. |
 | Jobs stuck as "awaiting AI"; Telegram says AI ranking paused | The $5/day AI budget is used up (or the Anthropic key/credit failed). Jobs are ranked once the budget resets the next day, or raise it in Settings → AI models. |
 | `npm ci` fails building `better-sqlite3` | `sudo apt -y install build-essential python3 && npm rebuild better-sqlite3` |
+
+### Upwork restricted access
+When Upwork restricts the account, the governor stops every Upwork call (worker and chat) and sends one Telegram message. Nothing resumes on its own.
+1. `npm run governor -- status` to confirm the state and see the last warning.
+2. Contact Upwork support and wait until they restore access.
+3. Only then run `npm run governor -- resume`. It restarts at slow-down level L2.
+4. Never raise the limits (daily cap, gaps, intervals) to catch up.
 | `next build` killed (out of memory) | Add swap: `sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' \| sudo tee -a /etc/fstab` |
 | Worker restarts in a loop | `journalctl -u up-assistant-worker -n 200`. A crash other than a network blip exits on purpose so systemd restarts it cleanly; `systemctl show up-assistant-worker -p NRestarts` counts the restarts. |
 | Port 3010 already in use (web) | `sudo ss -ltnp \| grep 3010`. Another `next` is running. |

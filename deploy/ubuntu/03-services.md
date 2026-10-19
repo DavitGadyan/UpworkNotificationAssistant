@@ -27,7 +27,7 @@ systemctl status up-assistant-worker
 journalctl -u up-assistant-worker -f                 # live log, Ctrl+C to leave
 curl -s http://127.0.0.1:3010/api/health; echo       # {"ok":true,"workerStale":false,"lateFeeds":0,...}
 ```
-A healthy worker log looks like this, with one block per feed every ~4 minutes:
+With the default searcher (Settings → Who searches Upwork = "chat") the worker never searches, so it logs no feed lines. When the searcher is "worker", a healthy log looks like this, each feed at most every 5 minutes:
 ```
 worker started (… db=supabase …)
 feed "Most Recent" (mcp) { returned: 10, fresh: 1, enriched: 1, ranked: 1, … calls: 2 }

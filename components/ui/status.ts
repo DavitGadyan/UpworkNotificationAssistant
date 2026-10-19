@@ -15,6 +15,7 @@ export function jobPill(status: JobStatus, score: ScoreBreakdown, s: Pick<Settin
   if (isOffProfile(score)) return { label: "Not your field", cls: "pill-neutral" };
   if (score.excluded) return { label: "Filtered out", cls: "pill-bad" };
   if (status === "awaiting_ai") return { label: "Waiting for AI check", cls: "pill-neutral" };
+  if (status === "awaiting_payment") return { label: "Waiting for payment verification", cls: "pill-info" };
   if (status === "called") return { label: "Called", cls: "pill-good" };
   if (!score.llm && score.total >= s.telegramMin) return { label: "Not AI-checked", cls: "pill-warn" };
   if (score.total >= s.callMin) return { label: "Top match", cls: "pill-good" };

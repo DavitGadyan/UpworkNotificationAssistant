@@ -3,7 +3,7 @@
 Stop the Mac first, then start the box. This order matters for three reasons:
 - **Upwork token.** Both machines share one Upwork login (in Supabase). Two machines refreshing it at the same time can get it revoked.
 - **Telegram.** Only one process may long-poll the bot for button taps; the second one gets `409 Conflict`.
-- **Lease.** The Mac's polling lease lasts up to ~12 min (3 × poll interval). While the Mac holds it, the box shows `Standby`.
+- **Lease.** The Mac's polling lease lasts up to ~15 min (3 × poll interval). While the Mac holds it, the box shows `Standby`.
 
 Expect 5-15 minutes without polling. Jobs posted in that window are still picked up on the first poll, as long as they're on the feeds' first page.
 
@@ -40,7 +40,7 @@ sudo systemctl enable --now up-assistant-worker
 sudo systemctl enable --now up-assistant-web      # optional
 journalctl -u up-assistant-worker -f
 ```
-Within one poll cycle (~4 min, or ≤ 12 min without step 3) you should see `feed "…" (mcp)` blocks and no `Standby`.
+Within one poll cycle (≥ 5 min, or ≤ 15 min without step 3) you should see no `Standby`, and `feed "…" (mcp)` blocks if Settings → Who searches Upwork is "worker".
 
 ## 5. Verify end to end
 1. **Phone app:** the "Home worker offline" banner is gone, and Home → Polling health shows "All on time".

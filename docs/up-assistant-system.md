@@ -1,7 +1,7 @@
 ---
 title: "Up Assistant - system overview"
 subtitle: "How the Upwork assistant finds jobs, drafts proposals and learns from client replies"
-date: "2026-10-15"
+date: "2026-10-17"
 ---
 
 # 1. What it does
@@ -14,7 +14,7 @@ Up Assistant watches Upwork for jobs that fit David Gadyan (Expert-Vetted AI eng
 
 # 2. How a job flows through the system
 
-1. **Polling (every 4 minutes, with jitter).** The worker reads 4 Upwork feeds through the official Upwork MCP connector: Most Recent, Best Matches, a keyword search for AI/data/marketing, and a *Scout* search for SaaS, automation, web3, 3D and technical specs. Only one machine polls at a time (a lease in the database). A guard keeps Upwork calls spaced out, capped per day and paused after repeated errors. Upwork pages are never scraped.
+1. **Searching (each feed at most every 5 minutes).** One searcher, chosen in Settings → Who searches Upwork (the Claude chat watch loop by default, or the worker), reads the Upwork feeds through the official Upwork MCP connector: Most Recent, Best Matches, a saved search and a keyword search. Every Upwork call goes through the pacing governor: at least 4 s apart (8 s for job opens), at most 200 an hour and 2,800 a day, 60 job opens a day, slower after any warning, and a full stop if Upwork restricts the account until a human resumes it. Upwork pages are never scraped.
 2. **Hard rules (code, free).** Client countries India, Pakistan, Turkey and Azerbaijan are rejected; jobs with 20+ proposals are rejected. David's point-based rules score budget, client spend and hire rate, competition and skills. These thresholds and points only change when he changes them.
 3. **Field check (code, free).** Is this David's kind of work at all? Skill tags, title and Upwork category are matched against his fields (AI agents and automation, ML/DL, data science and Python analysis, algorithmic trading, dApps/web3, AI content incl. 3D, AI marketing/SEO/GEO/AEO, AI-powered SaaS, AI accounting systems, technical specs). Work outside them (game dev, legal, admin, bookkeeping roles, logo design…) is hidden and never alerted.
 4. **Client record.** The client's spend, hire rate, reviews and job activity are loaded before anything is judged.
@@ -29,7 +29,7 @@ Up Assistant watches Upwork for jobs that fit David Gadyan (Expert-Vetted AI eng
 
 | Agent | What it does | When it runs | Model | May change | Never does |
 |---|---|---|---|---|---|
-| **Job ranker** (`job_ranking`, v4) | Scores every new job in his fields: fit, value potential, hire likelihood, red flags, the "big fish" problem | Every new job, ~4-minute cycles, within the $5/day AI budget | claude-sonnet-5-5 | Rank and alert of a job | Alert on rules alone; touch Upwork |
+| **Job ranker** (`job_ranking`, v4) | Scores every new job in his fields: fit, value potential, hire likelihood, red flags, the "big fish" problem | Every new job, feeds at most every 5 min, within the $5/day AI budget | claude-sonnet-5-5 | Rank and alert of a job | Alert on rules alone; touch Upwork |
 | **Proposal writer** (`proposal`, built-in) | Researches the client, diagnoses the real problem and writes a 600-900 character draft with a Loom placeholder, deliverables, budget and one question | When David taps Draft, or auto-draft for tight AI fits | claude-opus-5-5 (with web search) | A draft in "needs Loom" | Submit; invent facts; contact off-platform |
 | **Closer** (`closer`, built-in) | Suggests the next reply in an open client conversation | When David opens a conversation in Closer | claude-opus-5-5 | A suggested message for him to copy | Send messages |
 | **Profile coach** (`profile_coach`, built-in) | Benchmarks his profile against top peers and suggests changes | Monthly or on demand | claude-opus-5-5 | A report | Edit his profile |
@@ -117,7 +117,7 @@ STEP 2 - DIAGNOSIS: the big fish in dark waters
 
 STEP 3 - THE DRAFT (coverLetter). SHORT. 600-900 characters total, never more. Exactly this structure, nothing else:
 
-Hi <contactName>,          ("Hi there," if no name)
+Hi <contactName>,          ("Hi," if no name - never "Hi there". The app swaps "Hi" for the client's own language, e.g. "Γεια σας" for Cyprus)
 
 <Opener: 1-2 sentences naming their real pain / big fish in their own terms, with proof folded in as at most half a sentence ("I solved exactly this for a law firm"). No "I read your post", no summary of the post.>
 
@@ -170,7 +170,8 @@ How to work:
 1. Diagnose where the deal is: discovery, solution fit, pricing/negotiation, objection, closing, or stalled. Name the client's real concern behind their words.
 2. Read the person: their style from their messages (brief/detailed, formal/casual, technical/business), and use the cultural profile only as a starting hypothesis - the individual's own behaviour always overrides it. Never stereotype or mention nationality in the reply.
 3. Pick one next move from the playbook that fits (teach something valuable, tailor to their goal, take control of next steps, trade concessions rather than give them, quantify the cost of inaction, propose a paid discovery milestone, ask for the decision).
-4. Write the reply David can paste: short, human, specific, in the client's register. No pressure tactics, no false scarcity, no invented facts. Keep money and contracts on Upwork - never suggest moving off-platform.
+4. Payment safety: if the client's payment method is not verified, the reply must make sure a funded milestone (or a verified payment method) is in place before any work starts - ask for it politely as a normal next step, never as an accusation. Never call a client "new" unless their account is at most 2 days old; zero hires only means "no hiring history".
+5. Write the reply David can paste: short, human, specific, in the client's register. No pressure tactics, no false scarcity, no invented facts. Keep money and contracts on Upwork - never suggest moving off-platform.
 
 Return: stage, clientRead (2-3 sentences), culturalNotes (how to adapt tone, as hypotheses), recommendedMove, reply, alternatives (1-2 shorter variants), risks, nextStep (what David should do after sending), and questionsToAsk.
 

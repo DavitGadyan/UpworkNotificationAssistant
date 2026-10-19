@@ -50,9 +50,9 @@ export const MY_FIELDS: FieldDef[] = [
     label: "ML, deep learning & computer vision",
     tags: ["machine learning", "deep learning", "neural network", "pytorch", "tensorflow", "keras", "scikit-learn", "computer vision", "opencv", "image processing",
       "object detection", "image recognition", "image segmentation", "ocr", "optical character recognition", "natural language processing", "nlp", "text classification",
-      "sentiment analysis", "speech recognition", "recommendation system", "time series analysis", "predictive modeling", "predictive analytics", "mlops", "model deployment",
+      "sentiment analysis", "speech recognition", "recommendation system", "time series analysis", "predictive modeling", "predictive analytics", "mlops", "aiops", "llmops", "model deployment", "amazon sagemaker", "vertex ai", "mlflow", "kubeflow",
       "yolo", "bert", "machine learning model", "~machine learning", "~deep learning", "~computer vision"],
-    title: /\b(machine learning|ml|deep learning|neural net\w*|pytorch|tensorflow|computer vision|opencv|ocr|nlp|natural language|object detection|fac(e|ial) recognition|liveness|deepfakes?|speech.to.text|speech recognition|image (recognition|classification|segmentation)|fine.?tun\w*|model (training|deployment)|mlops|recommend(er|ation) (system|engine)|predictive model\w*|forecasting model)\b/i,
+    title: /\b(machine learning|ml|deep learning|neural net\w*|pytorch|tensorflow|computer vision|opencv|ocr|nlp|natural language|object detection|fac(e|ial) recognition|liveness|deepfakes?|speech.to.text|speech recognition|image (recognition|classification|segmentation)|fine.?tun\w*|(model|ai|ml|llm) (training|deployment|serving|inference|infrastructure|ops)|mlops|aiops|llmops|recommend(er|ation) (system|engine)|predictive model\w*|forecasting model)\b/i,
   },
   {
     label: "Data science & data engineering",
@@ -110,10 +110,18 @@ export const MY_FIELDS: FieldDef[] = [
     title: /\b(ai[- ]?(generated )?(videos?|images?|art|avatars?|ugc|animation|influencers?|models?|photos?|content)|text.?to.?(video|image)|midjourney|stable diffusion|comfyui|higgsfield|heygen|synthesia|runway|kling|veo ?3?|sora|dall.?e|lora|3d (anima\w*|model\w*|render\w*|artists?|design\w*|configurators?|visuali[sz]\w*|product)|blender|cinema ?4d|c4d|3ds ?max|zbrush|keyshot|product configurators?)\b/i,
   },
   {
+    // Python + AI data work: dedup / record linkage / entity resolution, cleaning and migrations (CRM data included).
+    label: "Data processing, cleaning & record linkage",
+    tags: ["data cleaning", "data cleansing", "data deduplication", "deduplication", "record linkage", "entity resolution", "data matching",
+      "fuzzy matching", "data migration", "data processing", "data transformation", "data normalization", "data quality", "master data management",
+      "data scrubbing", "data wrangling", "crm data migration"],
+    title: /\b(de-?dup\w*|duplicates?|record linkage|entity resolution|fuzzy match\w*|data (cleaning|cleansing|cleanup|clean-up|processing|migration|matching|normali[sz]ation|transformation|quality|scrubbing|wrangling|merge|merging)|merg(e|ing) (records|contacts|duplicates|accounts|leads)|(crm|contact|lead|customer) (data )?(cleanup|clean-up|dedup\w*)|master data)\b/i,
+  },
+  {
     label: "Cloud & DevOps",
     tags: ["devops", "aws", "amazon web services", "google cloud platform", "google cloud", "microsoft azure", "azure", "docker", "kubernetes", "terraform", "ci/cd",
       "github actions", "serverless"],
-    title: /\b(devops|aws|azure|gcp|google cloud|docker|kubernetes|k8s|terraform|ci\/cd|serverless|cloud (engineer|architect|infrastructure)|sre)\b/i,
+    title: /\b(devops|aws|azure|gcp|google cloud|docker|kubernetes|k8s|terraform|ci\/cd|serverless|cloud (engineer|architect|infrastructure)|(deployment|platform|infrastructure|devsecops) engineer|sre)\b/i,
   },
 ];
 

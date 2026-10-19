@@ -41,6 +41,15 @@ describe("hire likelihood / ghost risk (advisory)", () => {
     expect(i.archetype).toBe("ghost_poster");
     expect(i.ghostRisk).toBe("high");
   });
+  it("says 'new client' only for an account at most 2 days old, never for a dormant zero-hire account", () => {
+    const empty = { totalSpent: 0, hires: 0, jobsPosted: 1, hireRatePercent: null, openJobs: 1, hours: 0, contractsTotal: 0 };
+    const j = job({}, { totalSpent: 0, totalHires: 0 });
+    const dormant = assessIntent(j, enr(empty, { clientSince: "2025-08-13T00:00:00Z" }), { now });
+    expect(dormant.evidence.join(" ")).not.toMatch(/new client/i);
+    expect(dormant.evidence.join(" ")).toMatch(/No hiring history/);
+    expect(assessIntent(j, enr(empty), { now }).evidence.join(" ")).not.toMatch(/new client/i);
+    expect(assessIntent(j, enr(empty, { clientSince: "2026-10-12T12:00:00Z" }), { now }).evidence.join(" ")).toMatch(/New client: account created ≤ 2 days ago/);
+  });
   it("rates the established senior-living client as genuine / low risk", () => {
     const j = mergeDetail(job({}), base.patch, base.enrichment);
     const i = assessIntent(j, base.enrichment, { now });
@@ -72,5 +81,22 @@ describe("proposal structure guard", () => {
     const late = good.replace("Loom: {{LOOM_URL}}\n\n", "") + "\n\nLoom: {{LOOM_URL}}";
     expect(structureProblems(late).join()).toMatch(/third block/);
     expect(structureProblems(good + "\n\nP.S. Book a call" + " x".repeat(400)).join()).toMatch(/characters|P\.S\./);
+  });
+});
+
+describe("hire count missing from a search row (David, 2026-10-19)", () => {
+  it("treats a missing hire count next to real spend as unknown, never as a 0% mass poster", async () => {
+    const { assessIntent } = await import("@/lib/ranking/intent");
+    const { knownHires, knownHireRate } = await import("@/lib/ranking/rules");
+    const { demoJobs } = await import("@/lib/fixtures");
+    const job = { ...demoJobs(Date.now(), "h")[0], client: { paymentVerified: true, identityVerified: true, totalSpent: 4_080_336, totalHires: 0, totalPostedJobs: 280, totalReviews: 120, totalFeedback: 4.81, country: "United States", hasFinancialPrivacy: false } };
+    expect(knownHires(job, null)).toBeNull();
+    expect(knownHireRate(job, null)).toBeNull();
+    const i = assessIntent(job, null);
+    expect(i.archetype).not.toBe("mass_poster");
+    expect(i.evidence.join(" ")).not.toMatch(/0% hired/);
+    // A genuinely unspent client still counts as 0 hires; hires above posts cap at 100%.
+    expect(knownHires({ client: { ...job.client, totalSpent: 0 } }, null)).toBe(0);
+    expect(knownHireRate({ client: { ...job.client, totalHires: 331 } }, null)).toBe(100);
   });
 });

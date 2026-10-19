@@ -1,0 +1,6 @@
+{
+  "name": "gw",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.18" }
+}

@@ -11,7 +11,7 @@ import { buildLessons, decideLessons } from "./learning/lessons";
 import { syncProposalOutcomes } from "./learning/outcomes";
 import { saveLabReport, updateLabConfig } from "./learning/promptLab";
 import { query } from "./pg";
-import { approve, attachLoom, discard, editDraft, preview, submit } from "./proposals/submit";
+import { approve, attachLoom, discard, editDraft, markApplied, preview, submit } from "./proposals/submit";
 import { fetchViaClaude } from "./upwork/claudeFetch";
 import { usageReport } from "./usage";
 
@@ -47,10 +47,15 @@ export async function dispatch(path: string, method: string, body: Body = {}): P
     const patch: Parameters<typeof editDraft>[1] = {};
     if (typeof body.coverLetter === "string") patch.coverLetter = body.coverLetter.slice(0, 5000);
     if (Array.isArray(body.answers)) patch.answers = (body.answers as { question: string; answer: string }[]).map((a) => ({ question: String(a.question), answer: String(a.answer) }));
-    if (body.bid !== undefined) patch.bid = body.bid === null || body.bid === "" ? null : Number(body.bid);
+    if (body.bid !== undefined) {
+      const bid = body.bid === null || body.bid === "" ? null : Number(body.bid);
+      if (bid !== null && !Number.isFinite(bid)) throw new ActionError("Bid must be a number");
+      patch.bid = bid;
+    }
+    if (typeof body.estimatedDuration === "string") patch.estimatedDuration = body.estimatedDuration;
     return editDraft(Number(m[1]), patch);
   }
-  if ((m = p.match(/^\/api\/proposals\/(\d+)\/(loom|approve|preview|submit|discard|rewrite)$/)) && method === "POST") {
+  if ((m = p.match(/^\/api\/proposals\/(\d+)\/(loom|approve|preview|submit|discard|rewrite|applied)$/)) && method === "POST") {
     const id = Number(m[1]);
     switch (m[2]) {
       case "loom": return attachLoom(id, String(body.url ?? ""));
@@ -59,6 +64,7 @@ export async function dispatch(path: string, method: string, body: Body = {}): P
       case "submit": return submit(id, String(body.confirm ?? "")); // still requires the literal "SUBMIT"
       case "discard": return discard(id);
       case "rewrite": return rewriteProposal(id);
+      case "applied": return markApplied(id);
     }
   }
   if (p === "/api/closer" && method === "GET") {

@@ -173,7 +173,7 @@ The nginx snippet already sets `proxy_read_timeout 600s`, because drafting a pro
 8. **Install on your phone:** open the site → Share → **Add to Home Screen**.
 
 ## 6. Keep it healthy
-- **Polling goal:** every feed fetched successfully within the poll interval. A feed late by more than 15 minutes posts "⏰ Polling behind" to Telegram, and "✅ recovered" when it's back.
+- **Polling goal:** every feed searched by the selected searcher (Settings → Who searches Upwork), each at most every 5 min, paced by the governor. A feed late by more than 15 minutes posts "⏰ Polling behind" to Telegram, and "✅ recovered" when it's back.
 - **Uptime monitor:** point UptimeRobot, Better Stack or similar at `https://jobs.s1mpleai.org/api/health`. It's public, returns 200 when on time and 503 when late, and reveals no feed names.
 - **Logs:** `docker compose logs -f worker` or `journalctl -u pulse-worker -f`.
 - **Backups:** the database is Supabase. Use the project's daily backups (Supabase → Database → Backups), or run `pg_dump "$SUPABASE_DB_URL" > backup.sql` for a local copy.
@@ -185,7 +185,7 @@ The nginx snippet already sets `proxy_read_timeout 600s`, because drafting a pro
 |---|---|
 | Overview: "Upwork not connected" | Settings → Connect Upwork. If you see "state mismatch", start the login again from the same browser |
 | "Upwork login expired" message in Telegram | Settings → Connect Upwork again. Tokens refresh on their own, but a revoked or unused refresh token needs a fresh login |
-| "Paused until … after repeated errors" | The circuit breaker tripped (Upwork 429/5xx). It resumes after 30 minutes, or press Reset on Settings once things look fine |
+| "Paused until … after repeated errors" / slowed down | The governor raised the slow-down level after a 429, "too quickly" or 5xx (L1 10, L2 20, L3 40 min per feed); two clean hours lower it. "Restricted" stops everything until `npm run governor -- resume` (see `npm run governor -- status`) |
 | No Telegram alerts | Run `curl .../api/telegram/discover` (needs basic auth). The bot must be an **admin** of the channel with "Post messages" and "Edit messages of others" |
 | Buttons do nothing | The webhook isn't registered (step 5.5), or `TELEGRAM_WEBHOOK_SECRET` differs from the one used in setWebhook |
 | "Daily LLM budget reached" | Raise Settings → AI models → Daily budget. Alerts keep working on the rules-only score |

@@ -5,6 +5,7 @@ import type { Job, JobEnrichment, LlmRanking, RuleResult } from "../types";
 import { structured, untrusted } from "./llm";
 import { profileDigest, relevantProjects } from "./profile";
 import { repeatPoster, repeatPosterNote } from "../ranking/repeatPoster";
+import { knownHireRate, knownHires } from "../ranking/rules";
 import { getPrompt } from "./prompts";
 
 /* JobRankingAssistant, stage B: the LLM judgement on fit and client value. */
@@ -38,7 +39,7 @@ export function jobBrief(job: Job, e: JobEnrichment | null | undefined): string 
     `Category: ${job.category ?? "?"}${e?.subcategory ? " › " + e.subcategory : ""}`,
     `Skills: ${job.skills.join(", ")}`,
     `Proposals: ${job.proposalsTier ?? job.totalApplicants} · Posted: ${job.publishedAt}`,
-    `Client: ${c.country ?? "?"}${e?.clientState ? ", " + e.clientState : ""} · payment ${c.paymentVerified === true ? "verified" : c.paymentVerified === false ? "NOT verified" : "unknown"} · spent $${Math.round(e?.record.totalSpent ?? c.totalSpent)} · hires ${e?.record.hires ?? c.totalHires} · jobs posted ${e?.record.jobsPosted ?? c.totalPostedJobs} · hire rate ${e?.record.hireRatePercent ?? "?"}% · hours ${e?.record.hours ?? "?"} · rating ${e?.record.feedbackScore ?? c.totalFeedback} (${e?.record.feedbackCount ?? c.totalReviews} reviews) · open jobs ${e?.record.openJobs ?? "?"}`,
+    `Client: ${c.country ?? "?"}${e?.clientState ? ", " + e.clientState : ""} · payment ${c.paymentVerified === true ? "verified" : c.paymentVerified === false ? "NOT verified" : "unknown"} · spent $${Math.round(e?.record.totalSpent ?? c.totalSpent)} · hires ${knownHires(job, e) ?? "not in this listing (unknown - do not treat as 0)"} · jobs posted ${e?.record.jobsPosted ?? c.totalPostedJobs} · hire rate ${knownHireRate(job, e) ?? "?"}% · hours ${e?.record.hours ?? "?"} · rating ${e?.record.feedbackScore ?? c.totalFeedback} (${e?.record.feedbackCount ?? c.totalReviews} reviews) · open jobs ${e?.record.openJobs ?? "?"}`,
   ];
   if (e) {
     lines.push(`This job: invites ${e.activity.invitesSent}, interviewing ${e.activity.interviewed}, offers ${e.activity.offered}, hired ${e.activity.hired}`);

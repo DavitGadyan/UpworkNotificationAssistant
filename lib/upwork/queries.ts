@@ -1,4 +1,4 @@
-import type { Job, SavedSearch } from "../types";
+import type { Job, JobEnrichment, SavedSearch } from "../types";
 import { gql } from "./graphql";
 
 // Scope: "Read marketplace Job Postings". Only fields the scorer and the UI actually use.
@@ -101,20 +101,87 @@ export function mapNode(n: Node, verifiedPaymentFilter: boolean): Job {
   };
 }
 
-export async function searchJobs(s: SavedSearch): Promise<Job[]> {
+export async function searchJobs(s: SavedSearch, meta: { category?: string } = {}): Promise<Job[]> {
   const data = await gql<{ marketplaceJobPostingsSearch: { edges: { node: Node }[] } }>(SEARCH_JOBS, {
     filter: buildFilter(s),
     sort: [{ field: "RECENCY" }],
-  });
+  }, { label: "api.search", meta: { feed: true, ...meta } });
   return data.marketplaceJobPostingsSearch.edges.map((e) => mapNode(e.node, s.verifiedPaymentOnly));
 }
 
 export async function whoAmI(): Promise<string | null> {
   try {
-    const d = await gql<{ user: { name: string | null; nid: string | null } }>(ME);
+    const d = await gql<{ user: { name: string | null; nid: string | null } }>(ME, {}, { label: "api.me" });
     return d.user.name ?? d.user.nid ?? null;
   } catch {
     return null;
   }
 }
 
+
+/*
+ * Job details + client activity (scope "Job Details Entities - Read-Only"). UNVERIFIED field names: Upwork's schema
+ * reference isn't reachable without a key, so these follow the names the MCP connector returns. Once the key works,
+ * `npm run api:schema` dumps the live schema to docs/upwork-graphql-schema.json - confirm or fix the fields here.
+ * Until then a schema error is logged and the job is judged on its search row (no client activity), never failed.
+ */
+export const JOB_DETAILS = /* GraphQL */ `
+  query jobDetails($id: ID!) {
+    marketplaceJobPosting(id: $id) {
+      id
+      content { description }
+      workFlowState { status }
+      activityStat { jobActivity { invitesSent totalInvitedToInterview totalHired totalUnansweredInvites totalOffered } }
+      clientCompanyPublic { id paymentVerification { paymentVerified } }
+    }
+  }
+`;
+
+interface DetailNode {
+  id: string;
+  content?: { description?: string | null } | null;
+  workFlowState?: { status?: string | null } | null;
+  activityStat?: { jobActivity?: { invitesSent?: number; totalInvitedToInterview?: number; totalHired?: number; totalUnansweredInvites?: number; totalOffered?: number } | null } | null;
+  clientCompanyPublic?: { id?: string | null; paymentVerification?: { paymentVerified?: boolean | null } | null } | null;
+}
+
+const SCHEMA_ERROR = /Cannot query field|Unknown (argument|type)|Validation error|FieldUndefined|not exist/i;
+
+/** Map an API job-details answer onto the same shape the MCP path produces (lib/upwork/mcp/jobs.ts mapDetail). */
+export function mapApiDetail(d: DetailNode, job: Pick<Job, "description" | "client"> | null, now = new Date()): { enrichment: JobEnrichment; patch: Partial<Job> } {
+  const a = d.activityStat?.jobActivity ?? {};
+  const c = job?.client;
+  const verified = d.clientCompanyPublic?.paymentVerification?.paymentVerified;
+  const enrichment: JobEnrichment = {
+    fetchedAt: now.toISOString(),
+    description: d.content?.description ?? job?.description ?? "",
+    connectsCost: null, connectsBalance: null, canApply: null, applied: false,
+    status: d.workFlowState?.status ?? null,
+    subcategory: null, clientState: null, clientTimezone: null,
+    record: {
+      hires: c?.totalHires ?? null, contractsTotal: null, contractsActive: null, totalSpent: c?.totalSpent ?? null,
+      feedbackScore: c?.totalFeedback ?? null, feedbackCount: c?.totalReviews ?? null, hours: null,
+      jobsPosted: c?.totalPostedJobs ?? null,
+      hireRatePercent: c?.totalPostedJobs ? Math.round(((c.totalHires ?? 0) / c.totalPostedJobs) * 100) : null,
+      openJobs: null,
+    },
+    activity: { invitesSent: a.invitesSent ?? 0, interviewed: a.totalInvitedToInterview ?? 0, hired: a.totalHired ?? 0, offered: a.totalOffered ?? 0, unansweredInvites: a.totalUnansweredInvites ?? 0 },
+    bidStats: null, workHistory: [], reviews: [], otherOpenJobs: [], screeningQuestions: [], preferredQualifications: null,
+    clientId: d.clientCompanyPublic?.id ?? null,
+  };
+  const patch: Partial<Job> = verified == null || !c ? {} : { client: { ...c, paymentVerified: verified } };
+  return { enrichment, patch };
+}
+
+export async function apiJobDetail(id: string, job: Pick<Job, "description" | "client"> | null): Promise<{ enrichment: JobEnrichment; patch: Partial<Job> } | null> {
+  try {
+    const d = await gql<{ marketplaceJobPosting: DetailNode | null }>(JOB_DETAILS, { id }, { label: "api.job", meta: { jobId: id } });
+    return d.marketplaceJobPosting ? mapApiDetail(d.marketplaceJobPosting, job) : null;
+  } catch (e) {
+    if (SCHEMA_ERROR.test((e as Error).message)) {
+      console.warn("api job details: schema mismatch - run npm run api:schema and fix JOB_DETAILS:", (e as Error).message.slice(0, 200));
+      return null;
+    }
+    throw e;
+  }
+}

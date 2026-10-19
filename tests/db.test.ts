@@ -4,6 +4,17 @@ import { demoJobs } from "@/lib/fixtures";
 import { processResults } from "@/lib/pipeline";
 import { scoreJob } from "@/lib/scoring";
 
+describe("database connection", () => {
+  it("moves Supabase transaction-pooler URLs to the session pooler, unless told not to", async () => {
+    const { sessionPoolerUrl } = await import("@/lib/pg");
+    const tx = "postgresql://pulse_app.abc:pw@aws-1-eu-west-1.pooler.supabase.com:6543/postgres";
+    expect(sessionPoolerUrl(tx)).toBe("postgresql://pulse_app.abc:pw@aws-1-eu-west-1.pooler.supabase.com:5432/postgres");
+    expect(sessionPoolerUrl("postgresql://postgres:pw@db.abc.supabase.co:5432/postgres")).toBe("postgresql://postgres:pw@db.abc.supabase.co:5432/postgres");
+    process.env.DB_POOLER_MODE = "transaction";
+    try { expect(sessionPoolerUrl(tx)).toBe(tx); } finally { delete process.env.DB_POOLER_MODE; }
+  });
+});
+
 describe("retention and pipeline", () => {
   beforeEach(() => resetDbForTests());
 
@@ -67,9 +78,39 @@ describe("proposal gate and preference loop", () => {
     expect(withLoom.coverLetter).toContain("LOOM VIDEO: https://www.loom.com/share/abc123");
     expect((await approve(p.id)).status).toBe("approved");
     await expect(submit(p.id, "yes")).rejects.toThrow(/SUBMIT/);
+    // An autosave that changes nothing keeps the approval.
+    expect((await editDraft(p.id, { coverLetter: withLoom.coverLetter, bid: 5000 })).status).toBe("approved");
     // Editing after approval drops it back to "ready" - approval has to be given again.
     expect((await editDraft(p.id, { coverLetter: withLoom.coverLetter + "\nP.S. Feel free to book a call" })).status).toBe("ready");
     await expect(preview(p.id)).rejects.toThrow(/Approve/);
+    // A note to David in any answer blocks approval; headings are saved in capitals.
+    const noted = await editDraft(p.id, { coverLetter: withLoom.coverLetter.replace("BUDGET:", "Budget:"), answers: [{ question: "Q", answer: "Shipped it. [DAVID: add link]" }] });
+    expect(noted.coverLetter).toContain("BUDGET: $5,000");
+    await expect(approve(p.id)).rejects.toThrow(/Answer 1 still has a note to you/);
+    await editDraft(p.id, { answers: [{ question: "Q", answer: "Shipped it." }] });
+    expect((await approve(p.id)).status).toBe("approved");
+  });
+
+  it("records a proposal David pasted into Upwork himself, but never one that still has a note to him", async () => {
+    const { createProposal } = await import("@/lib/db");
+    const { discard, editDraft, markApplied } = await import("@/lib/proposals/submit");
+    const base = {
+      jobId: "j2", jobTitle: "AI agent", jobUrl: "https://www.upwork.com/jobs/~02j2", status: "needs_loom" as const,
+      coverLetter: "Hi Alan,\n\nBUDGET: $5,000", research: null, answers: [{ question: "Q", answer: "Shipped it. [DAVID: add link]" }], bid: 5000,
+      estimatedDuration: null, portfolioProjectIds: [], loomUrl: null, approvedAt: null, preview: null, previewId: null,
+      submittedAt: null, originalDraft: "x", model: "m", promptVersion: null,
+    };
+    const p = await createProposal(base);
+    await expect(markApplied(p.id)).rejects.toThrow(/Answer 1 still has a note to you/);
+    await editDraft(p.id, { answers: [{ question: "Q", answer: "Shipped it." }] });
+    const sent = await markApplied(p.id); // no Loom needed: David sent it by hand
+    expect(sent.status).toBe("submitted");
+    expect(sent.preview?.manual).toBe(true);
+    expect(sent.submittedAt).toBeTruthy();
+    await expect(markApplied(p.id)).rejects.toThrow(/Already submitted/);
+    const q = await createProposal({ ...base, jobId: "j3", answers: [] });
+    await discard(q.id);
+    await expect(markApplied(q.id)).rejects.toThrow(/discarded/);
   });
 
   it("learns David's taste from 👍/👎 and proposes weights only with enough data", async () => {
@@ -94,6 +135,7 @@ describe("polling goal", () => {
     const { healthReport, lateTransitions, recordFeedRun } = await import("@/lib/health");
     const { setWorkerHeartbeat } = await import("@/lib/db");
     const f = await createSearch({ kind: "most_recent", name: "Most Recent", enabled: true, skills: [], query: "", jobType: "ANY", minHourly: null, minBudget: null, experienceLevel: "ANY", verifiedPaymentOnly: false, maxProposals: null, excludeKeywords: [], excludeCountries: [] });
+    await saveSettings({ upwork: { ...(await getSettings()).upwork, poller: "worker" } }); // feed lateness is the worker's goal only when it searches
     const t0 = Date.now();
     await setWorkerHeartbeat({ at: t0, lastError: null, lastFetched: 0 });
     await recordFeedRun(f.id, f.name, true, { returned: 10 }, t0);
@@ -103,6 +145,9 @@ describe("polling goal", () => {
     const late = await healthReport(t0 + 16 * 60_000);
     expect(late.ok).toBe(false);
     expect(late.feeds[0]).toMatchObject({ late: true, failures: 1, successRate24h: 50 });
+    await saveSettings({ upwork: { ...(await getSettings()).upwork, poller: "chat" } });
+    expect((await healthReport(t0 + 16 * 60_000)).ok).toBe(true); // the chat session searches: worker feeds idle on purpose
+    await saveSettings({ upwork: { ...(await getSettings()).upwork, poller: "worker" } });
     expect(await lateTransitions(t0 + 16 * 60_000)).toEqual({ late: ["Most Recent"], recovered: [] });
     expect((await lateTransitions(t0 + 17 * 60_000)).late).toEqual([]); // alert only once
     await recordFeedRun(f.id, f.name, true, { returned: 8 }, t0 + 18 * 60_000);
@@ -137,6 +182,35 @@ describe("enrich before judging", () => {
     expect(sent).toEqual([j.id]);
   });
 
+  it("alerts a job in his fields when Upwork refuses the client lookup, with a missing-record warning", async () => {
+    const { getJob } = await import("@/lib/db");
+    await aiOn();
+    const f = await feed();
+    const sent: string[] = [];
+    const [base] = demoJobs(Date.now(), "ref");
+    const j = { ...base, title: "AI agent developer: voice AI receptionist with n8n" };
+    const refused = { enrich: async () => { throw new Error('find_jobs: {"error_code":"PERMISSION","reason":"jobs are being opened too quickly"}'); }, rank: async () => verdict };
+    const r = await processResults(f, [j], { notifiers: notifiers(sent), hooks: refused });
+    expect(r.pending).toBe(0);
+    expect(sent).toEqual([j.id]);
+    const stored = await getJob(j.id);
+    expect(stored?.score.rules?.flags.find((x) => x.code === "no_record")?.severity).toBe("amber");
+  });
+
+  it("judges a waiting job in his fields on the feed row when no lookups are left, instead of holding it forever", async () => {
+    const { retryPending } = await import("@/lib/pipeline");
+    await aiOn();
+    const f = await feed();
+    const sent: string[] = [];
+    const [base] = demoJobs(Date.now(), "wait");
+    const j = { ...base, title: "AI agent developer: voice AI receptionist with n8n" };
+    const failing = { enrich: async () => { throw new Error("502 Bad Gateway"); }, rank: async () => verdict };
+    expect((await processResults(f, [j], { notifiers: notifiers(sent), hooks: failing })).pending).toBe(1);
+    const r = await retryPending({ notifiers: notifiers(sent), budget: { enrich: 0, llm: 5 }, hooks: failing });
+    expect(r.pending).toBe(0);
+    expect(sent).toEqual([j.id]);
+  });
+
   it("alerts a strong AI fit without red flags even below the rank threshold", async () => {
     const { alertLane } = await import("@/lib/pipeline");
     const base = { total: 50, skills: 0, client: 0, budget: 0, competition: 0, excluded: null, matchedSkills: [] };
@@ -147,6 +221,8 @@ describe("enrich before judging", () => {
     expect(alertLane({ ...base, total: 70 }, 60)).toBeNull(); // AI on: never alert without its verdict
     expect(alertLane({ ...base, total: 70, llm }, 60)).toBe("rank");
     expect(alertLane({ ...base, total: 90, excluded: "India" }, 60)).toBeNull();
+    const located = { score: 90, rejected: null, flags: [{ code: "location_restricted", label: "Location requirement", severity: "red" as const, penalty: 35 }], passes: [], category: "ai" as const, derived: { avgPaid: null, avgPerContract: null, lastHireDays: null, hireRate: null } };
+    expect(alertLane({ ...base, total: 90, llm, rules: located }, 60)).toBeNull(); // "MUST BE UK BASED": never alerted
   });
 
   const aiOn = async () => {
@@ -155,6 +231,31 @@ describe("enrich before judging", () => {
     await saveSettings({ telegramMin: 10, callMode: "off", llm: { ...(await getSettings()).llm, provider: "claude-cli" } });
   };
   const verdict = { model: "m", category: "ai" as const, offProfile: false, field: "Voice AI agents", fit: 90, valuePotential: 80, summary: "s", finalProduct: "p", skillsWanted: [], reasons: [], redFlags: [], bigFish: "", similarProject: true };
+
+  it("holds a good fit until the client verifies payment, then alerts it; weak fits stay filtered", async () => {
+    const { createSearch: mk, getJob } = await import("@/lib/db");
+    const { checkPaymentWatches } = await import("@/lib/pipeline");
+    await aiOn();
+    const f = await mk({ kind: "most_recent", name: "Verified only", enabled: true, skills: [], query: "", jobType: "ANY", minHourly: null, minBudget: null, experienceLevel: "ANY", verifiedPaymentOnly: true, maxProposals: null, excludeKeywords: [], excludeCountries: [] } as never);
+    const sent: string[] = [];
+    const [a, b] = demoJobs(Date.now(), "pay");
+    const good = { ...a, title: "AI agent developer: voice AI receptionist with n8n", client: { ...a.client, paymentVerified: false, country: "United Kingdom" } };
+    const weak = { ...b, title: "AI chatbot tweaks", client: { ...b.client, paymentVerified: false, country: "United Kingdom" } };
+    const rank = async (j: { id: string }) => ({ ...verdict, fit: j.id === good.id ? 88 : 50 });
+    await processResults(f, [good, weak], { notifiers: notifiers(sent), hooks: { enrich: async () => null, rank } });
+    expect(sent).toEqual([]);
+    expect((await getJob(good.id))?.status).toBe("awaiting_payment");
+    expect((await getJob(weak.id))?.score.excluded).toBe("Payment not verified");
+
+    const t0 = Date.now();
+    const still = await checkPaymentWatches(5, { now: new Date(t0 + 11 * 60_000), notifiers: notifiers(sent), hooks: { rank }, lookup: async () => ({ ...good }) });
+    expect(still[good.id]).toBe("still unverified");
+    expect(sent).toEqual([]);
+    const verified = await checkPaymentWatches(5, { now: new Date(t0 + 22 * 60_000), notifiers: notifiers(sent), hooks: { rank }, lookup: async () => ({ ...good, client: { ...good.client, paymentVerified: true } }) });
+    expect(verified[good.id]).toBe("verified → notified");
+    expect(sent).toEqual([good.id]);
+    expect(await checkPaymentWatches(5, { now: new Date(t0 + 60 * 60_000), lookup: async () => null })).toEqual({});
+  });
 
   it("never ranks, alerts or lists work outside David's fields", async () => {
     const { listJobs } = await import("@/lib/db");
@@ -249,6 +350,7 @@ describe("auto proposal drafts", () => {
     await insertJob(jobs[3], f.id, sc(95, "India"), Date.now(), { enrichment: e });    // excluded
     await insertJob(jobs[4], f.id, sc(70), Date.now(), { enrichment: e });             // already drafted
     await createProposal({ jobId: jobs[4].id, jobTitle: "x", jobUrl: "u", status: "needs_loom", coverLetter: "c", research: null, answers: [], bid: 1, estimatedDuration: null, portfolioProjectIds: [], loomUrl: null, approvedAt: null, preview: null, previewId: null, submittedAt: null, originalDraft: "c", model: null, promptVersion: null });
+    // jobs[0]: rank 80, 4 proposals, posted minutes ago - qualifies by day and by night.
     expect((await autoDraftCandidates()).map((j) => j.id)).toEqual([jobs[0].id]);
   });
 });

@@ -38,6 +38,9 @@ export interface Job {
 }
 
 /** Extra client intelligence from find_jobs action=get. Only fetched for jobs that pass the cheap filters. */
+/** A file the client attached to the job post (when the connector returns it). */
+export interface JobAttachment { name: string; url: string | null }
+
 export interface JobEnrichment {
   fetchedAt: string;
   description: string;
@@ -49,6 +52,10 @@ export interface JobEnrichment {
   subcategory: string | null;
   clientState: string | null;
   clientTimezone: string | null;
+  /** When the client's Upwork account was created ("Member since"), if Upwork returns it - null when unknown. */
+  clientSince?: string | null;
+  /** Files attached to the post, if Upwork returns them. */
+  attachments?: JobAttachment[];
   record: {
     hires: number | null; // jobs_with_hires
     contractsTotal: number | null;
@@ -136,6 +143,17 @@ export interface Settings {
   source: "auto" | "mcp" | "graphql";
   /** Ban-safety: per-cycle and per-day caps on Upwork calls, plus poll jitter. */
   guard: { maxEnrichPerCycle: number; dailyCallCap: number; jitterSec: number; minGapMs: number };
+  /** Who searches Upwork feeds: this Claude chat session's watch loop, or the worker. Never both (lib/upwork/governor.ts). */
+  upwork: {
+    poller: "chat" | "worker";
+    /**
+     * Evening peak (David, 2026-10-17): high-value US clients post from ~18:00 Armenian time. Inside the window
+     * each feed runs every `peakEveryMin` (4); outside it every `offPeakEveryMin` (7), and off-peak may use at most
+     * (100 − reservePct)% of the day's budget so the evening is never starved. `learn` adds hours where
+     * high-value jobs actually showed up (after 7 days of data). Times are HH:MM in `timezone`.
+     */
+    peak: { enabled: boolean; timezone: string; start: string; end: string; peakEveryMin: number; offPeakEveryMin: number; reservePct: number; learn: boolean };
+  };
   watch: { enabled: boolean; intervalMin: number; maxHours: number };
   /** provider: api = Claude API key; claude-cli = local Claude Code login (`claude -p`, subscription). */
   llm: {
@@ -146,6 +164,16 @@ export interface Settings {
   rules: RankingRules;
   /** Draft a proposal automatically for every job ranked at or above minRank (never submitted). */
   autoDraft: { enabled: boolean; minRank: number; dailyCap: number; perCycle: number; webSearch: boolean };
+  /**
+   * Night auto-apply (David, 2026-10-18): while he sleeps (default 00:00-11:00 Asia/Yerevan) auto-drafted proposals
+   * for jobs that clear every bar below are submitted without a Loom video, within per-night and Connects limits.
+   * Off by default; never runs while the pacing governor is stopped. Every submission is reported on Telegram.
+   */
+  autoApply: {
+    enabled: boolean; timezone: string; start: string; end: string;
+    maxPerNight: number; minRank: number; minFit: number; maxProposals: number;
+    maxConnectsPerNight: number; minConnectsBalance: number; requireVerifiedPayment: boolean;
+  };
   /** Settings → Your fields: phrases added to the built-in field lists (lib/ranking/fields.ts). */
   profileFit: { never: string[]; alsoMine: string[] };
 }
@@ -153,8 +181,9 @@ export interface Settings {
 /**
  * pending = saved before its client record loaded; awaiting_ai = record loaded but the AI ranking hasn't run yet
  * (budget, outage, per-cycle cap). Both are retried and never alerted until then.
+ * awaiting_payment = a good fit whose client hasn't verified payment yet; re-checked and alerted once they do.
  */
-export type JobStatus = "new" | "pending" | "awaiting_ai" | "notified" | "called" | "dismissed" | "drafting" | "applied";
+export type JobStatus = "new" | "pending" | "awaiting_ai" | "awaiting_payment" | "notified" | "called" | "dismissed" | "drafting" | "applied";
 
 /** Profile-fit gate (lib/ranking/profileFit.ts): is this David's kind of work at all? */
 export interface ProfileFit {
@@ -178,7 +207,11 @@ export interface ScoreBreakdown {
   intent?: ClientIntent | null;
   /** Off-profile jobs are excluded ("Not your field — …"); absent on rows scored before 2026-10-14. */
   profileFit?: ProfileFit;
+  /** The chat watch loop alerted David on this job (`npm run vouch`): its fit counts for auto-draft and auto-apply. */
+  watch?: WatchVouch | null;
 }
+
+export interface WatchVouch { fit: number; at: string; why?: string }
 
 export type IntentArchetype =
   | "ghost_poster" | "unfunded" | "template_collector" | "mass_poster" | "identity_fronting" | "data_harvest" | "stale"

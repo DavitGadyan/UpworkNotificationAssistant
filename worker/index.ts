@@ -1,8 +1,11 @@
 /*
- * Worker. One loop every `pollIntervalSec` (default 300 s, ± jitter):
- *   purge stale Upwork data → poll every enabled feed (Most Recent, Best Matches, saved searches)
- *   → rank (rules → enrichment → LLM) → notify → re-check watched jobs → periodic jobs
+ * Worker. One loop every `pollIntervalSec` (at least 300 s, + jitter):
+ *   purge stale Upwork data → poll every enabled feed (Most Recent, Best Matches, saved searches), but only
+ *   when Settings → "Who searches Upwork" is the worker (otherwise the Claude chat loop searches and the
+ *   worker never does) → rank (rules → enrichment → LLM) → notify → re-check watched jobs → periodic jobs
  *   (daily profile sync, monthly client-profile rebuild + performance snapshot).
+ * Every Upwork call is decided by the pacing governor (lib/upwork/governor.ts); once Upwork says access is
+ * "restricted" the worker makes no Upwork calls at all until `npm run governor -- resume`.
  * Settings are re-read every loop, so dashboard changes apply without a restart.
  * Flags: --once (single tick, then exit), --dry-run (rank and store, but send no alerts/calls).
  */
@@ -12,16 +15,19 @@ import { runDemo } from "@/lib/demo";
 import { lateTransitions, recordFeedRun } from "@/lib/health";
 import { runPeriodic } from "@/lib/insights/periodic";
 import { runAutoDrafts } from "@/lib/autodraft";
+import { runAutoApply } from "@/lib/autoapply";
 import { runOutcomeChecks } from "@/lib/outcomes";
 import { publishWorkerStatus, runActionQueue } from "@/lib/actions";
 import { connectsBalance } from "@/lib/usage";
 import { hostname } from "node:os";
 import { sendText } from "@/lib/notify/telegram";
 import { pollCallbacks } from "@/lib/notify/telegramActions";
-import { processResults, retryAwaitingAi, retryPending, type CycleBudget } from "@/lib/pipeline";
+import { checkPaymentWatches, processResults, retryAwaitingAi, retryPending, type CycleBudget } from "@/lib/pipeline";
 import { RateLimitError } from "@/lib/ratelimit";
 import { GuardError, jitteredInterval } from "@/lib/upwork/guard";
+import { isRestricted, setCaller } from "@/lib/upwork/governor";
 import { activeSource, fetchFeed } from "@/lib/upwork/source";
+import { mcpConnected } from "@/lib/upwork/mcp/client";
 import { runWatches } from "@/lib/watch";
 
 const args = new Set(process.argv.slice(2));
@@ -63,13 +69,15 @@ async function tick() {
     return;
   }
   if (src === "none") { lastError = "Not connected - open Settings and connect Upwork"; return; }
+  if (await isRestricted()) { lastError = "Upwork restricted access - all Upwork calls stopped (npm run governor -- resume)"; return; }
 
   const s = await getSettings();
+  const polls = s.upwork.poller === "worker";
   const budget: CycleBudget = { enrich: s.guard.maxEnrichPerCycle, llm: s.llm.maxRankPerCycle };
   lastFetched = 0;
   lastError = null;
   // Jobs parked last cycle without a client record go first, so none waits long.
-  try {
+  if (polls) try {
     const p = await retryPending({ budget, ...(DRY ? { notifiers: dryNotifiers } : {}) });
     if (p.enriched || p.pending) log("pending retried", p);
   } catch (e) { log("pending retry error", (e as Error).message); }
@@ -78,7 +86,7 @@ async function tick() {
     const a = await retryAwaitingAi({ budget, ...(DRY ? { notifiers: dryNotifiers } : {}) });
     if (a.ranked || a.awaitingAi) log("awaiting AI retried", a);
   } catch (e) { log("awaiting AI retry error", (e as Error).message); }
-  for (const feed of (await listSearches()).filter((f) => f.enabled)) {
+  for (const feed of polls ? (await listSearches()).filter((f) => f.enabled) : []) {
     if (stopping) break;
     try {
       const jobs = await fetchFeed(feed);
@@ -90,21 +98,31 @@ async function tick() {
       lastError = `${feed.name}: ${(e as Error).message}`;
       await recordFeedRun(feed.id, feed.name, false, { error: (e as Error).message });
       log("error", lastError);
-      if (e instanceof GuardError) { await alertOnce(e.kind, e.message); break; }
+      if (e instanceof GuardError) { if (e.kind !== "restricted" && e.kind !== "throttled") await alertOnce(e.kind, e.message); break; }
       if (e instanceof RateLimitError) break;
     }
   }
+  // Restricted mid-tick (the governor already sent the Telegram alert): no watch, payment or outcome calls either.
+  if (await isRestricted()) return;
 
   // Polling goal: alert once when a feed misses its window, and once when it recovers.
-  const t = await lateTransitions();
+  const t = polls ? await lateTransitions() : { late: [], recovered: [] };
   if (t.late.length && !DRY) await sendText(`⏰ <b>Polling behind</b>: no successful fetch for ${t.late.join(", ")} in the last ${Math.round((3 * s.pollIntervalSec) / 60)} min. Last error: ${(lastError ?? "none").replace(/</g, "&lt;")}`);
   if (t.recovered.length && !DRY) await sendText(`✅ Polling recovered: ${t.recovered.join(", ")}`);
 
   if (s.watch.enabled && src === "mcp" && !DRY) {
     try {
-      const w = await runWatches(6);
+      const w = await runWatches(2);
       if (Object.keys(w).length) log("watch", w);
     } catch (e) { log("watch error", (e as Error).message); }
+  }
+
+  // Good fits held until the client verifies payment (one Upwork call per due check).
+  if (src === "mcp" && !DRY) {
+    try {
+      const pw = await checkPaymentWatches(4, { budget });
+      if (Object.keys(pw).length) log("payment watch", pw);
+    } catch (e) { log("payment watch error", (e as Error).message); }
   }
 
   if (src === "mcp" && !DRY) {
@@ -119,6 +137,15 @@ async function tick() {
       const d = await runAutoDrafts();
       if (d.drafted.length) log("auto-drafted", d.drafted);
     } catch (e) { log("autodraft error", (e as Error).message); }
+  }
+
+  // Night auto-apply (Settings → Auto-apply at night, off by default): at most one submission per cycle.
+  // Submitting goes through the MCP connector even when searching uses the official API.
+  if (!DRY && (src === "mcp" || await mcpConnected())) {
+    try {
+      const r = await runAutoApply();
+      if (r.submitted || (r.skipped && !/disabled|outside|no qualifying/.test(r.skipped))) log("auto-apply", r);
+    } catch (e) { log("auto-apply error", (e as Error).message); }
   }
 
   if (src === "mcp") {
@@ -160,6 +187,7 @@ async function statusLoop() {
 }
 
 async function main() {
+  setCaller("worker");
   void callbackLoop();
   void actionLoop();
   void statusLoop();

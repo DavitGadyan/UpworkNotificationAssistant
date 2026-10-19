@@ -6,12 +6,12 @@ A personal AI back office for winning high-value Upwork work.
 - It drafts proposals you finish with a Loom video, coaches replies to clients, and reviews your profile and results every month.
 
 ```
-Upwork MCP ──► worker (every 5 min ± jitter, ban-safe guard)
-                 │  feeds: Most Recent · Best Matches · saved search URL
+Upwork MCP ──► pacing governor (lib/upwork/governor.ts) ──► one searcher: Claude chat loop (default) or worker
+                 │  feeds: Most Recent · Best Matches · saved search URL · keyword, each at most every 5 min
                  ▼
           JobRankingAssistant
             1. rules     (lib/ranking/rules.ts)   country / proposals / payment / rates / agency / hire-rate
-            2. details   (find_jobs get)          client record, history, reviews (promising jobs only)
+            2. details   (find_jobs get)          client record, history, reviews (promising jobs only, ≤ 120/day)
             3. LLM       (lib/agents/jobRanking)  fit, value, summary, final product, big fish
                  │
                  ├─► Telegram channel alert (opens in the Upwork app) + 👍/👎 feedback

@@ -1,5 +1,6 @@
 import { aiRankingState } from "./aiStatus";
 import { getSettings, getWorkerHeartbeat, kvGet, kvSet, listSearches } from "./db";
+import { governorStatus } from "./upwork/governor";
 
 /*
  * Polling goal (SLO): every enabled feed is fetched successfully at least once per poll interval.
@@ -60,9 +61,13 @@ export async function healthReport(now = Date.now()) {
   });
   const hb = await getWorkerHeartbeat();
   const workerStale = !hb || now - hb.at > lateAfterMs;
+  const pacing = await governorStatus(now);
+  // Feed lateness only matters when the worker is the one searching (Settings → Who searches Upwork).
+  const workerPolls = s.upwork.poller === "worker";
   return {
-    ok: !workerStale && feeds.every((f) => !f.late),
-    goal: `Every enabled feed fetched successfully at least every ${Math.round(s.pollIntervalSec / 60)} min; alert after ${Math.round(lateAfterMs / 60000)} min without success`,
+    ok: !workerStale && pacing.state !== "stopped" && (!workerPolls || feeds.every((f) => !f.late)),
+    goal: `One searcher (${s.upwork.poller === "chat" ? "Claude chat session" : "worker"}); each feed category at most every ${pacing.cadenceMin} min, calls spread out, ≤ ${pacing.budgets.day.cap.toLocaleString()} Upwork calls per 24 h; every call decided by the pacing governor`,
+    pacing,
     workerHeartbeat: hb ? new Date(hb.at).toISOString() : null,
     workerStale,
     lateAfterMin: Math.round(lateAfterMs / 60000),

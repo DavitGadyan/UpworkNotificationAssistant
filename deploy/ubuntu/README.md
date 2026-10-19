@@ -20,7 +20,7 @@ Files used by the steps:
 
 ```
                     ┌──────────── home Ubuntu box (outbound connections only) ────────────┐
-Upwork MCP  ◄────── │  up-assistant-worker  ── polls feeds every ~4 min, ranks (Claude),   │ ──► Telegram
+Upwork MCP  ◄────── │  up-assistant-worker  ── ranks (Claude), searches only if selected,  │ ──► Telegram
 (read-only)         │                          alerts, drafts, reply tracking, phone queue │
                     │  up-assistant-web     ── dashboard on 127.0.0.1:3010 (optional)      │
                     └───────────────────────────────┬──────────────────────────────────────┘
@@ -47,6 +47,6 @@ Upwork MCP  ◄────── │  up-assistant-worker  ── polls feeds e
 - [ ] Code in `/opt/up-assistant`, `.env` copied from the Mac, `chmod 600`
 - [ ] `npm ci && npm run build` succeed; dry run ranks jobs ([02](02-app.md#5-dry-run))
 - [ ] Mac services stopped, then Ubuntu services enabled ([04](04-switch-over.md))
-- [ ] `journalctl -u up-assistant-worker` shows `feed "…" (mcp)` lines every ~4 min, no `Standby`
+- [ ] `journalctl -u up-assistant-worker` shows no `Standby` (and `feed "…" (mcp)` lines at most every 5 min only when Settings → Who searches Upwork is "worker")
 - [ ] Phone app: no "Home worker offline" banner; Polling health shows "All on time"
 - [ ] Revoke the Supabase personal access tokens (not needed on the box)

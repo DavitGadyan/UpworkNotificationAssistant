@@ -38,7 +38,7 @@ Use the Mac's file unchanged. These keys matter most:
 | Key | Must be | Why |
 |---|---|---|
 | `TOKEN_ENC_KEY` | **identical to the Mac** | The Upwork login in Supabase is encrypted with it. If it's different, you have to log in to Upwork again and the old token is unreadable. |
-| `SUPABASE_DB_URL` | the `pulse_app` URL on the **transaction pooler, port 6543** (`aws-1-eu-west-1.pooler.supabase.com:6543`) | The same database as now. Never use the `postgres` superuser here. |
+| `SUPABASE_DB_URL` | the `pulse_app` URL on the **session pooler, port 5432** (`aws-1-eu-west-1.pooler.supabase.com:5432`; a 6543 URL is switched to 5432 automatically) | The same database as now. Never use the `postgres` superuser here. |
 | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `OWNER_EMAIL` | same | Push notifications and phone sign-in checks |
 | `ANTHROPIC_API_KEY` | same (or a rotated one) | Ranking, drafts, lessons |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | same | Alerts. Button taps arrive by long-poll; no webhook or public URL needed. |

@@ -40,7 +40,7 @@ The `.env` must be **the same as on the Mac**, especially:
 | Key | Why |
 |---|---|
 | `TOKEN_ENC_KEY` | The Upwork login is stored encrypted in Supabase with this key. Keep it the same and you won't have to log in again. |
-| `SUPABASE_DB_URL` | Transaction pooler, port **6543** (`aws-1-eu-west-1.pooler.supabase.com:6543`) |
+| `SUPABASE_DB_URL` | Session pooler, port **5432** (`aws-1-eu-west-1.pooler.supabase.com:5432`). A 6543 URL is switched to 5432 automatically (the transaction pooler hangs on parallel queries); set `DB_POOLER_MODE=transaction` to keep it |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Alerts and button taps (long-poll; no webhook or public URL needed) |
 | `ANTHROPIC_API_KEY` | Ranking and drafts |
 | `PUBLIC_BASE_URL` | Leave `http://localhost:3010` |
@@ -69,7 +69,7 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 sudo systemctl daemon-reload && sudo systemctl enable --now upwork-worker
-journalctl -u upwork-worker -f      # expect: worker started (… db=supabase …), then feed lines every ~4 min
+journalctl -u upwork-worker -f      # expect: worker started (… db=supabase …), then feed lines every ≥ 5 min only if Settings → Who searches Upwork is "worker"
 ```
 
 ## 4. Web dashboard on your LAN (optional)
@@ -109,13 +109,13 @@ claude                       # /mcp → upwork → authenticate, then /exit
 If `claude` isn't at `~/.local/bin/claude`, set `CLAUDE_BIN=` in `.env`.
 
 ## 6. Switch over from the Mac
-1. Check the Ubuntu worker: `journalctl -u upwork-worker -n 50`. You should see feed lines and no `Standby`. (If the Mac still holds the lease, it shows `Standby` for up to ~12 min.)
+1. Check the Ubuntu worker: `journalctl -u upwork-worker -n 50`. You should see feed lines and no `Standby`. (If the Mac still holds the lease, it shows `Standby` for up to ~15 min.)
 2. On the Mac, stop and disable its services:
    ```bash
    launchctl bootout gui/$(id -u)/org.s1mpleai.pulse.worker
    launchctl bootout gui/$(id -u)/org.s1mpleai.pulse.web
    ```
-   Within one lease period (3 × poll interval ≈ 12 min), the Ubuntu worker takes over polling.
+   Within one lease period (3 × poll interval ≈ 15 min), the Ubuntu worker takes over polling.
 3. In the app: Overview → Polling health should show the Ubuntu host's fetches, and the "Home worker offline" banner should be gone.
 
 ## 7. If Upwork ever asks you to log in again
@@ -137,7 +137,7 @@ npm ci && sudo systemctl restart upwork-worker
 |---|---|
 | App says "Home worker offline" | `systemctl status upwork-worker`; internet up; `journalctl -u upwork-worker -n 100` |
 | Log shows `Standby - X is polling` forever | Another machine (X) still runs the worker; stop it |
-| `query timed out` in the log | The Supabase pooler dropped a reply. The query is cancelled and retried next loop. If it repeats, check `SUPABASE_DB_URL` uses port 6543. |
+| `query timed out` in the log | The Supabase pooler dropped a reply. The query is cancelled and retried next loop. If it repeats, check the app is on the session pooler (port 5432) and `DB_POOLER_MODE` is not set to `transaction`. |
 | Phone action stuck as "queued" | The worker isn't running. Actions left "running" for 15 min are failed automatically, and you can retry them. |
-| Upwork "opened too quickly" | Normal back-off. The guard spaces calls 1.5–3.5 s apart and pauses on errors. |
+| Upwork "opened too quickly" | The governor pauses all job opens for 30 min (doubling per level) and slows each feed down; it is never retried. If Upwork says "restricted", every Upwork call stops until you run `npm run governor -- resume` (only after Upwork support restores access). `npm run governor -- status` shows the state. |
 | Box asleep | `sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target` |

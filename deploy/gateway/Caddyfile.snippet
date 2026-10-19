@@ -1,0 +1,4 @@
+# Add to /etc/caddy/Caddyfile on the VM (Caddy gets the TLS certificate by itself), then: sudo systemctl reload caddy
+gw.s1mpleai.org {
+	reverse_proxy 127.0.0.1:8787
+}

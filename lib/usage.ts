@@ -3,6 +3,7 @@ import { getSettings, kvGet, kvSet, listJobs, mcpCallStats } from "./db";
 import { mcpCallsToday } from "./upwork/guard";
 import { callTool, mcpConnected } from "./upwork/mcp/client";
 import { lastClaudeFetch } from "./upwork/claudeFetch";
+import { governorStatus } from "./upwork/governor";
 
 /*
  * Costs & balance:
@@ -82,6 +83,7 @@ export async function usageReport(opts: { refreshConnects?: boolean; offline?: b
       failed24h: calls24.failed,
       byTool24h: calls24.byTool,
       connects: await connectsBalance(opts.refreshConnects, opts.offline),
+      governor: await governorStatus(),
     },
   };
 }

@@ -5,6 +5,7 @@ import { FilterSelect } from "@/components/ui/FilterSelect";
 import { PageHead } from "@/components/ui/PageHead";
 import { ClaudeFetchButton } from "@/components/ClaudeFetchButton";
 import { UsageCard } from "@/components/UsageCard";
+import { UpworkStatus } from "@/components/UpworkStatus";
 import { Sparkline } from "@/components/ui/Sparkline";
 import { StatGrid } from "@/components/ui/StatGrid";
 import { LlmSpend } from "@/components/LlmSpend";
@@ -73,8 +74,10 @@ export default async function Overview({ searchParams }: { searchParams: SP }) {
           “Waiting for AI check” and nothing is alerted on rules alone. It resumes at 00:00 UTC, or raise the budget in <a href="/settings" className="underline">Settings → AI models</a>.
         </div>
       )}
-      {health && <PollingHealth h={health} />}
+      {/* Worker feed health only matters when the worker is the searcher; the Upwork card covers the chat searcher. */}
+      {health && health.pacing.poller === "worker" && <PollingHealth h={health} />}
 
+      <UpworkStatus />
       <UsageCard />
 
       <div className="mb-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -155,46 +158,31 @@ function Tile({ href, icon, label, value, sub, tone }: { href: string; icon: Rea
   );
 }
 
-const KIND: Record<string, string> = { most_recent: "Most Recent", best_match: "Best Matches", search: "Search" };
 
 function PollingHealth({ h }: { h: Awaited<ReturnType<typeof healthReport>> }) {
   return (
     <section className="card mb-4 p-5 md:p-6" aria-labelledby="ph-h">
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-        <div className="flex flex-wrap items-center gap-3">
-          <h2 id="ph-h" className="display text-[20px] font-semibold">Polling health</h2>
-          <span className={`pill ${h.ok ? "pill-good" : "pill-bad"}`}>
-            <span className="size-2 rounded-full" style={{ background: h.ok ? "var(--color-good)" : "var(--color-bad)" }} />
-            {h.ok ? "On target" : "Needs attention"}
-          </span>
-        </div>
-        <span className={`text-[14px] ${h.workerStale ? "text-[var(--color-bad)]" : "text-[var(--color-muted)]"}`}>
-          Worker {h.workerHeartbeat ? `seen ${timeAgo(h.workerHeartbeat)}` : "never seen"}{h.workerStale ? " · stale" : ""}
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="ph-h" className="display text-[20px] font-semibold">Worker feeds</h2>
+        <span className={`pill ${h.ok ? "pill-good" : "pill-bad"}`}>{h.ok ? "On target" : "Needs attention"}</span>
       </div>
-      <p className="mt-1 text-[14px] text-[var(--color-muted)]">Goal: {h.goal}.</p>
       {h.feeds.length === 0 ? (
-        <p className="mt-4 text-[14px] text-[var(--color-muted)]">No enabled feeds. Add one on the Feeds page.</p>
+        <p className="mt-3 text-[14px] text-[var(--color-muted)]">No enabled feeds.</p>
       ) : (
-        <ul className="mt-4 divide-row">
+        <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {h.feeds.map((f) => (
-            <li key={f.feedId} className={`grid gap-1 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-4 ${f.late ? "-mx-3 rounded-[12px] bg-[var(--color-bad-soft)] px-3" : ""}`}>
-              <div className="min-w-0">
-                <p className="flex flex-wrap items-center gap-2">
-                  <span className="truncate font-medium">{f.name}</span>
-                  <span className="tag">{KIND[f.kind] ?? f.kind}</span>
-                  {f.late && <span className="pill pill-bad">Late</span>}
-                </p>
-                {f.lastError && f.failures > 0 && <p className="mt-0.5 line-clamp-2 break-words text-[13px] text-[var(--color-bad)]">{f.lastError}</p>}
-              </div>
-              <p className={`flex flex-wrap gap-x-3 gap-y-0.5 text-[13px] sm:justify-end ${f.late ? "text-[var(--color-bad)]" : "text-[var(--color-muted)]"}`}>
-                <span>Last OK: {f.lastOkAt ? timeAgo(f.lastOkAt) : "never"}</span>
-                <span className="num">{f.runs24h ? `24h: ${f.successRate24h ?? 0}% of ${f.runs24h} runs` : "No runs in 24h"}</span>
-                {f.failures > 0 && <span className="num font-semibold text-[var(--color-bad)]">{f.failures} failing in a row</span>}
+            <div key={f.feedId} className="min-w-0 rounded-[14px] border border-[var(--color-line)] p-3" title={f.lastError ?? undefined}>
+              <p className="flex items-center gap-2 text-[13px] font-medium">
+                <span className="size-2 shrink-0 rounded-full" style={{ background: f.late ? "var(--color-bad)" : "var(--color-good)" }} />
+                <span className="truncate">{f.name}</span>
               </p>
-            </li>
+              <p className="num mt-1 text-[12px] text-[var(--color-muted)]">
+                {f.lastOkAt ? timeAgo(f.lastOkAt) : "never"} · {f.runs24h ? `${f.successRate24h ?? 0}% ok` : "no runs"}
+                {f.failures > 0 && <span className="text-[var(--color-bad)]"> · {f.failures} failing</span>}
+              </p>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
     </section>
   );

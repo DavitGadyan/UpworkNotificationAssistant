@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <meta name="dcterms.date" content="2026-10-15" />
+  <meta name="dcterms.date" content="2026-10-17" />
   <title>Up Assistant - system overview</title>
   <style>
     code{white-space: pre-wrap;}
@@ -24,16 +24,13 @@
     .display.math{display: block; text-align: center; margin: 0.5rem auto;}
   </style>
   <link rel="stylesheet" href=".docs.css" />
-  <!--[if lt IE 9]>
-    <script src="//cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv-printshiv.min.js"></script>
-  <![endif]-->
 </head>
 <body>
 <header id="title-block-header">
 <h1 class="title">Up Assistant - system overview</h1>
 <p class="subtitle">How the Upwork assistant finds jobs, drafts
 proposals and learns from client replies</p>
-<p class="date">2026-10-15</p>
+<p class="date">2026-10-17</p>
 </header>
 <h1 id="what-it-does">1. What it does</h1>
 <p>Up Assistant watches Upwork for jobs that fit David Gadyan
@@ -54,13 +51,15 @@ internet.</p>
 <h1 id="how-a-job-flows-through-the-system">2. How a job flows through
 the system</h1>
 <ol type="1">
-<li><strong>Polling (every 4 minutes, with jitter).</strong> The worker
-reads 4 Upwork feeds through the official Upwork MCP connector: Most
-Recent, Best Matches, a keyword search for AI/data/marketing, and a
-<em>Scout</em> search for SaaS, automation, web3, 3D and technical
-specs. Only one machine polls at a time (a lease in the database). A
-guard keeps Upwork calls spaced out, capped per day and paused after
-repeated errors. Upwork pages are never scraped.</li>
+<li><strong>Searching (each feed at most every 5 minutes).</strong> One
+searcher, chosen in Settings → Who searches Upwork (the Claude chat
+watch loop by default, or the worker), reads the Upwork feeds through
+the official Upwork MCP connector: Most Recent, Best Matches, a saved
+search and a keyword search. Every Upwork call goes through the pacing
+governor: at least 4 s apart (8 s for job opens), at most 200 an hour
+and 2,800 a day, 60 job opens a day, slower after any warning, and a
+full stop if Upwork restricts the account until a human resumes it.
+Upwork pages are never scraped.</li>
 <li><strong>Hard rules (code, free).</strong> Client countries India,
 Pakistan, Turkey and Azerbaijan are rejected; jobs with 20+ proposals
 are rejected. David’s point-based rules score budget, client spend and
@@ -119,7 +118,8 @@ approval.</li>
 <td><strong>Job ranker</strong> (<code>job_ranking</code>, v4)</td>
 <td>Scores every new job in his fields: fit, value potential, hire
 likelihood, red flags, the “big fish” problem</td>
-<td>Every new job, ~4-minute cycles, within the $5/day AI budget</td>
+<td>Every new job, feeds at most every 5 min, within the $5/day AI
+budget</td>
 <td>claude-sonnet-5-5</td>
 <td>Rank and alert of a job</td>
 <td>Alert on rules alone; touch Upwork</td>
@@ -285,7 +285,7 @@ STEP 2 - DIAGNOSIS: the big fish in dark waters
 
 STEP 3 - THE DRAFT (coverLetter). SHORT. 600-900 characters total, never more. Exactly this structure, nothing else:
 
-Hi &lt;contactName&gt;,          (&quot;Hi there,&quot; if no name)
+Hi &lt;contactName&gt;,          (&quot;Hi,&quot; if no name - never &quot;Hi there&quot;. The app swaps &quot;Hi&quot; for the client&#39;s own language, e.g. &quot;Γεια σας&quot; for Cyprus)
 
 &lt;Opener: 1-2 sentences naming their real pain / big fish in their own terms, with proof folded in as at most half a sentence (&quot;I solved exactly this for a law firm&quot;). No &quot;I read your post&quot;, no summary of the post.&gt;
 
@@ -334,7 +334,8 @@ How to work:
 1. Diagnose where the deal is: discovery, solution fit, pricing/negotiation, objection, closing, or stalled. Name the client&#39;s real concern behind their words.
 2. Read the person: their style from their messages (brief/detailed, formal/casual, technical/business), and use the cultural profile only as a starting hypothesis - the individual&#39;s own behaviour always overrides it. Never stereotype or mention nationality in the reply.
 3. Pick one next move from the playbook that fits (teach something valuable, tailor to their goal, take control of next steps, trade concessions rather than give them, quantify the cost of inaction, propose a paid discovery milestone, ask for the decision).
-4. Write the reply David can paste: short, human, specific, in the client&#39;s register. No pressure tactics, no false scarcity, no invented facts. Keep money and contracts on Upwork - never suggest moving off-platform.
+4. Payment safety: if the client&#39;s payment method is not verified, the reply must make sure a funded milestone (or a verified payment method) is in place before any work starts - ask for it politely as a normal next step, never as an accusation. Never call a client &quot;new&quot; unless their account is at most 2 days old; zero hires only means &quot;no hiring history&quot;.
+5. Write the reply David can paste: short, human, specific, in the client&#39;s register. No pressure tactics, no false scarcity, no invented facts. Keep money and contracts on Upwork - never suggest moving off-platform.
 
 Return: stage, clientRead (2-3 sentences), culturalNotes (how to adapt tone, as hypotheses), recommendedMove, reply, alternatives (1-2 shorter variants), risks, nextStep (what David should do after sending), and questionsToAsk.
 

@@ -22,7 +22,7 @@ export default async function Ranking() {
 
   return (
     <>
-      <PageHead title="How ranking works" subtitle={`Every ${Math.round(s.pollIntervalSec / 60)} minutes the worker reads your feeds through the official Upwork MCP connector and runs each new job through these steps.`} />
+      <PageHead title="How ranking works" subtitle={`The selected searcher (Settings → Who searches Upwork) reads your feeds through the official Upwork MCP connector, each at most every ${Math.round(s.pollIntervalSec / 60)} minutes and paced by the governor, and runs each new job through these steps.`} />
       <div className="grid gap-4">
         <Step n={0} title="Is it your field?">
           <p>A free check on Upwork&apos;s skill tags, the title and Upwork&apos;s category. <b>Your fields:</b> AI agents &amp; LLM apps, ML/deep learning/computer vision, data science &amp; engineering, algorithmic trading, voice agents &amp; automation, AI marketing &amp; ads, AI video &amp; image generation, web &amp; app development, blockchain, cloud &amp; DevOps, plus the skills on your Upwork profile.</p>

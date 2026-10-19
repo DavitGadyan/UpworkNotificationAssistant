@@ -15,7 +15,13 @@
     "mcp:login": "tsx --env-file=.env scripts/mcp-login.ts",
     "distill:playbook": "tsx --env-file=.env scripts/distill-playbook.ts",
     "docs": "tsx --env-file=.env scripts/build-docs.ts",
-    "migrate": "tsx --env-file=.env scripts/migrate.ts"
+    "migrate": "tsx --env-file=.env scripts/migrate.ts",
+    "governor": "tsx --env-file=.env scripts/governor.ts",
+    "ingest": "tsx --env-file=.env scripts/ingest.ts",
+    "vouch": "tsx --env-file=.env scripts/vouch.ts",
+    "calls": "tsx --env-file=.env scripts/calls.ts",
+    "api:schema": "tsx --env-file=.env scripts/api-schema.ts",
+    "gateway": "node gateway/server.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",

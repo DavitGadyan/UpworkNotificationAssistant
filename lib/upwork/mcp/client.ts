@@ -9,6 +9,7 @@ import { config, mcpRedirectUri } from "../../config";
 import { decrypt, encrypt } from "../../crypto";
 import { kvDel, kvGet, kvSet } from "../../db";
 import { GuardError, guarded } from "../guard";
+import type { CallMeta } from "../governor";
 
 /*
  * Client for Upwork's official MCP server (https://mcp.upwork.com/mcp).
@@ -144,11 +145,13 @@ export function unwrap<T>(v: T): T {
 }
 
 /** Call an Upwork MCP tool under the ban-safety guard and return its parsed JSON payload. */
-export async function callTool<T = Record<string, unknown>>(tool: string, action: string | null, params?: Record<string, unknown>, opts: { org?: boolean; orgUid?: string } = {}): Promise<T> {
+export async function callTool<T = Record<string, unknown>>(tool: string, action: string | null, params?: Record<string, unknown>, opts: { org?: boolean; orgUid?: string; meta?: CallMeta } = {}): Promise<T> {
   const args: Record<string, unknown> = {};
   if (action) args.action = action;
   if (opts.org !== false) args.org_uid = opts.orgUid ?? (await resolveOrg());
   if (params) args.params = params;
+  // Job opens carry their id so the governor can apply the per-job rules (once per 6 h, never after a refusal).
+  const meta: CallMeta = { ...opts.meta, ...(tool === "find_jobs" && action === "get" && params?.id ? { jobId: String(params.id) } : {}) };
   return guarded(`${tool}${action ? "." + action : ""}`, async () => {
     const c = await connect();
     let res;
@@ -166,7 +169,7 @@ export async function callTool<T = Record<string, unknown>>(tool: string, action
       throw new Error(`${tool}: ${String(json.error ?? json.message ?? text).slice(0, 300)}`);
     }
     return unwrap(json) as T;
-  });
+  }, meta);
 }
 
 /** The freelancer org_uid (TALENT account), cached in kv. */

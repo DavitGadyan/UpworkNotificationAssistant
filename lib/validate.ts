@@ -67,10 +67,10 @@ export function cleanSettings(b: Record<string, unknown>, cur: Settings): Settin
   const qh = { ...cur.quietHours, ...obj(b.quietHours) } as Settings["quietHours"];
   if (!hhmm.test(wh.start) || !hhmm.test(wh.end) || !hhmm.test(qh.start) || !hhmm.test(qh.end)) return "Times must be HH:MM";
   try { new Intl.DateTimeFormat("en-US", { timeZone: wh.timezone }); } catch { return `Unknown timezone ${wh.timezone}`; }
-  const g = obj(b.guard), wa = obj(b.watch), l = obj(b.llm);
+  const g = obj(b.guard), wa = obj(b.watch), l = obj(b.llm), up = obj(b.upwork);
   const model = (v: unknown, fallback: string) => (typeof v === "string" && /^claude-[a-z0-9-]+$/.test(v) ? v : fallback);
   return {
-    pollIntervalSec: n(b.pollIntervalSec, 120, 3600, cur.pollIntervalSec),
+    pollIntervalSec: n(b.pollIntervalSec, 300, 3600, cur.pollIntervalSec),
     alertsPaused: bool(b.alertsPaused, cur.alertsPaused),
     telegramEnabled: bool(b.telegramEnabled, cur.telegramEnabled),
     telegramMin: n(b.telegramMin, 0, 100, cur.telegramMin),
@@ -85,14 +85,32 @@ export function cleanSettings(b: Record<string, unknown>, cur: Settings): Settin
     },
     source: ["auto", "mcp", "graphql"].includes(String(b.source)) ? (b.source as Settings["source"]) : cur.source,
     guard: {
-      maxEnrichPerCycle: n(g.maxEnrichPerCycle, 0, 30, cur.guard.maxEnrichPerCycle),
-      dailyCallCap: n(g.dailyCallCap, 50, 10_000, cur.guard.dailyCallCap),
+      maxEnrichPerCycle: n(g.maxEnrichPerCycle, 0, 10, cur.guard.maxEnrichPerCycle),
+      dailyCallCap: n(g.dailyCallCap, 50, 2800, cur.guard.dailyCallCap),
       jitterSec: n(g.jitterSec, 0, 300, cur.guard.jitterSec),
-      minGapMs: n(g.minGapMs, 250, 30_000, cur.guard.minGapMs),
+      minGapMs: n(g.minGapMs, 3000, 30_000, cur.guard.minGapMs),
+    },
+    upwork: {
+      poller: up.poller === "worker" || up.poller === "chat" ? up.poller : cur.upwork.poller,
+      peak: (() => {
+        const pk = obj(up.peak), c = cur.upwork.peak;
+        let tz = typeof pk.timezone === "string" ? pk.timezone : c.timezone;
+        try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); } catch { tz = c.timezone; }
+        return {
+          enabled: bool(pk.enabled, c.enabled),
+          timezone: tz,
+          start: typeof pk.start === "string" && hhmm.test(pk.start) ? pk.start : c.start,
+          end: typeof pk.end === "string" && hhmm.test(pk.end) ? pk.end : c.end,
+          peakEveryMin: n(pk.peakEveryMin, 4, 30, c.peakEveryMin),
+          offPeakEveryMin: n(pk.offPeakEveryMin, 4, 60, c.offPeakEveryMin),
+          reservePct: n(pk.reservePct, 0, 90, c.reservePct),
+          learn: bool(pk.learn, c.learn),
+        };
+      })(),
     },
     watch: {
       enabled: bool(wa.enabled, cur.watch.enabled),
-      intervalMin: n(wa.intervalMin, 5, 240, cur.watch.intervalMin),
+      intervalMin: n(wa.intervalMin, 30, 240, cur.watch.intervalMin),
       maxHours: n(wa.maxHours, 1, 336, cur.watch.maxHours),
     },
     llm: {
@@ -105,6 +123,24 @@ export function cleanSettings(b: Record<string, unknown>, cur: Settings): Settin
       maxRankPerCycle: n(l.maxRankPerCycle, 0, 50, cur.llm.maxRankPerCycle),
     },
     rules: b.rules ? cleanRules(obj(b.rules), cur.rules) : cur.rules,
+    autoApply: (() => {
+      const a = obj(b.autoApply), c = cur.autoApply;
+      let tz = typeof a.timezone === "string" ? a.timezone : c.timezone;
+      try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); } catch { tz = c.timezone; }
+      return {
+        enabled: bool(a.enabled, c.enabled),
+        timezone: tz,
+        start: typeof a.start === "string" && hhmm.test(a.start) ? a.start : c.start,
+        end: typeof a.end === "string" && hhmm.test(a.end) ? a.end : c.end,
+        maxPerNight: n(a.maxPerNight, 0, 20, c.maxPerNight),
+        minRank: n(a.minRank, 50, 100, c.minRank),
+        minFit: n(a.minFit, 50, 100, c.minFit),
+        maxProposals: n(a.maxProposals, 1, 20, c.maxProposals),
+        maxConnectsPerNight: n(a.maxConnectsPerNight, 0, 500, c.maxConnectsPerNight),
+        minConnectsBalance: n(a.minConnectsBalance, 0, 1000, c.minConnectsBalance),
+        requireVerifiedPayment: bool(a.requireVerifiedPayment, c.requireVerifiedPayment),
+      };
+    })(),
     autoDraft: (() => {
       const a = obj(b.autoDraft), c = cur.autoDraft;
       return {

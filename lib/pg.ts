@@ -21,12 +21,23 @@ const MIGRATIONS = () => join(process.cwd(), "supabase", "migrations");
 /** Plain-Postgres migrations (no Supabase roles) - loaded into PGlite for tests. */
 export const tablesSql = () => ["001_tables.sql", "003_intent.sql", "005_actions.sql", "007_proposal_outcomes.sql", "009_prompt_stats.sql"].map((f) => readFileSync(join(MIGRATIONS(), f), "utf8")).join("\n");
 
+/**
+ * Supabase's transaction pooler (port 6543) leaves about half of concurrent queries from this app unanswered:
+ * measured 2026-10-15, 6 of 12 parallel queries hung every time, while the session pooler (port 5432) answered
+ * all 12 in about a second. Dashboard pages run several queries at once, so they stalled ~20 s and showed
+ * "the database was slow to answer". Pooler URLs therefore use session mode unless DB_POOLER_MODE=transaction.
+ */
+export function sessionPoolerUrl(url: string): string {
+  if (process.env.DB_POOLER_MODE === "transaction") return url;
+  return url.replace(/(\.pooler\.supabase\.com):6543(?=\/|$)/, "$1:5432");
+}
+
 function fromPostgres(url: string): Db {
   const sql = postgres(url, {
     max: Number(process.env.DB_POOL_MAX ?? 3), // small per process: web + worker share the pooler
     idle_timeout: 30,
     connect_timeout: 15,
-    prepare: false, // required by Supabase's transaction pooler (port 6543), which the app uses
+    prepare: false, // safe on both Supabase poolers (and required if DB_POOLER_MODE=transaction)
     // bigint (epoch ms, ids) comes back as a JS number - all values fit well within 2^53.
     types: { bigint: { to: 20, from: [20], serialize: (x: number) => String(x), parse: (x: string) => Number(x) } },
     transform: { undefined: null },
@@ -88,7 +99,7 @@ export async function getDb(): Promise<Db> {
   if (!opening) {
     opening = (async () => {
       const url = process.env.SUPABASE_DB_URL;
-      if (url) return fromPostgres(url);
+      if (url) return fromPostgres(sessionPoolerUrl(url));
       if (process.env.VITEST || process.env.DB_DRIVER === "pglite") return fromPglite();
       throw new Error("SUPABASE_DB_URL is not set (see .env.example)");
     })().then((d) => (current = d)).finally(() => { opening = null; });

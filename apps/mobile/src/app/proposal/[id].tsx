@@ -1,12 +1,14 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Clipboard from "expo-clipboard";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, View } from "react-native";
 import Animated from "react-native-reanimated";
 import { FeedbackButtons, openUpwork } from "../../components/job";
-import { IconCheck, IconCopy, IconExternal, IconRefresh } from "../../components/icons";
-import { Banner, Bullets, Button, Card, Empty, Field, KV, Pill, Row, Screen, SectionTitle, T } from "../../components/ui";
+import { IconCheck, IconCopy, IconExternal, IconRefresh, IconSend } from "../../components/icons";
+import { Banner, Bullets, Button, Card, Empty, Field, KV, Pill, PressableScale, Row, Screen, SectionTitle, Seg, T } from "../../components/ui";
 import { endpoints } from "../../lib/api";
+import { applyUrl, DURATIONS, findPlaceholders, letterForUpwork } from "../../lib/clean";
 import { fetchJob, fetchProposal, useQuery } from "../../lib/data";
 import { CONTACT_ROLE_LABELS, COVER_MAX, LOOM_PLACEHOLDER, LOOM_RE, money, timeAgo } from "../../lib/format";
 import { haptic } from "../../lib/haptics";
@@ -68,6 +70,37 @@ function PreviewPanel({ data }: { data: Record<string, unknown> }) {
   );
 }
 
+/** One field to paste into Upwork: tap to copy, ticked once copied. */
+function CopyRow({ label, preview, done, onPress }: { label: string; preview: string; done: boolean; onPress: () => void }) {
+  const { c } = useTheme();
+  return (
+    <PressableScale onPress={onPress} accessibilityLabel={`Copy ${label}`}>
+      <Row gap={12} style={{ minHeight: 56, paddingVertical: 8, borderTopWidth: 1, borderTopColor: c.line }}>
+        <View style={{ flex: 1, gap: 2 }}>
+          <T weight="medium" size={14}>{label}</T>
+          <T faint size={12} numberOfLines={1}>{preview || "—"}</T>
+        </View>
+        <Row gap={6} style={{ paddingHorizontal: 12, minHeight: 36, borderRadius: radius.pill, backgroundColor: done ? c.goodSoft : c.track }}>
+          {done ? <IconCheck size={14} color={c.good} /> : <IconCopy size={14} color={c.ink} />}
+          <T size={13} weight="medium" style={{ color: done ? c.good : c.ink }}>{done ? "Copied" : "Copy"}</T>
+        </Row>
+      </Row>
+    </PressableScale>
+  );
+}
+
+/** A red line under a field that still has a note to David or a fill-in slot. */
+function NoteWarning({ text }: { text: string }) {
+  const { c } = useTheme();
+  const hits = findPlaceholders(text);
+  if (!hits.length) return null;
+  return <T size={12} style={{ color: c.bad, marginTop: -6, marginBottom: 12 }}>Remove before sending: {hits.map((h) => `"${h.length > 60 ? `${h.slice(0, 57)}…` : h}"`).join(", ")}</T>;
+}
+
+const CACHE = (id: number) => `proposal-draft:${id}`;
+type Cached = { letter: string; answers: { question: string; answer: string }[]; bid: string; duration: string; savedAt: number };
+const AUTOSAVE_MS = 3000;
+
 export default function ProposalEditor() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const pid = Number(id);
@@ -79,14 +112,22 @@ export default function ProposalEditor() {
   const [letter, setLetter] = useState("");
   const [answers, setAnswers] = useState<{ question: string; answer: string }[]>([]);
   const [bid, setBid] = useState("");
+  const [duration, setDuration] = useState("");
   const [loom, setLoom] = useState("");
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitOpen, setSubmitOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  const [copied, setCopied] = useState<Record<string, boolean>>({});
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "offline">("idle");
+  const [restored, setRestored] = useState<Cached | null>(null);
+  const saveSeq = useRef(0);
+  const cacheChecked = useRef(false);
 
-  const dirty = !!p && (letter !== p.coverLetter || bid !== (p.bid == null ? "" : String(p.bid)) || JSON.stringify(answers) !== JSON.stringify(p.answers));
+  const dirty = !!p && (letter !== p.coverLetter || bid !== (p.bid == null ? "" : String(p.bid)) || duration !== (p.estimatedDuration ?? "") || JSON.stringify(answers) !== JSON.stringify(p.answers));
+  const bidValid = bid.trim() === "" || Number.isFinite(Number(bid));
+  const locked = !!p && (p.status === "submitted" || p.status === "discarded");
 
   // Load server state into the editor - on first load, and on live updates only when nothing is being edited.
   // (State adjusted during render - React's pattern for deriving state from changed props/data.)
@@ -94,9 +135,56 @@ export default function ProposalEditor() {
     setLetter(p.coverLetter);
     setAnswers(p.answers);
     setBid(p.bid == null ? "" : String(p.bid));
+    setDuration(p.estimatedDuration ?? "");
     setLoom(p.loomUrl ?? "");
     setLoadedAt(p.updatedAt);
   }
+
+  /** Save what is on screen. Only the server copy is refreshed, never the text boxes, so typing is never overwritten. */
+  async function persist(): Promise<boolean> {
+    if (!p || locked || !dirty) return true;
+    if (!bidValid) { setSaveState("offline"); return false; }
+    const n = ++saveSeq.current;
+    setSaveState("saving");
+    try {
+      const next = await endpoints.editProposal(p.id, { coverLetter: letter.slice(0, COVER_MAX), answers, bid: bid.trim() === "" ? null : Number(bid), estimatedDuration: duration || undefined });
+      if (n === saveSeq.current) {
+        q.setData(next);
+        setLoadedAt(next.updatedAt);
+        setSaveState("saved");
+        AsyncStorage.removeItem(CACHE(p.id)).catch(() => {});
+      }
+      return true;
+    } catch {
+      if (n === saveSeq.current) setSaveState("offline");
+      return false;
+    }
+  }
+
+  // Autosave: keep a copy on the phone at once, save to the server a few seconds after typing stops.
+  // (Each server save is one queued job for the home worker, so the pause is longer than the web editor's.)
+  useEffect(() => {
+    if (!p || locked || !dirty || !loadedAt) return;
+    const snap: Cached = { letter, answers, bid, duration, savedAt: Date.now() };
+    AsyncStorage.setItem(CACHE(p.id), JSON.stringify(snap)).catch(() => {});
+    const t = setTimeout(() => { void persist(); }, AUTOSAVE_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [letter, answers, bid, duration]);
+
+  // Edits made on this phone that never reached the server (app closed, worker offline): offer them back.
+  useEffect(() => {
+    if (!p || cacheChecked.current || !loadedAt) return;
+    cacheChecked.current = true;
+    AsyncStorage.getItem(CACHE(p.id)).then((raw) => {
+      if (!raw) return;
+      const c = JSON.parse(raw) as Cached;
+      const same = c.letter === p.coverLetter && c.bid === (p.bid == null ? "" : String(p.bid)) && c.duration === (p.estimatedDuration ?? "") && JSON.stringify(c.answers) === JSON.stringify(p.answers);
+      if (same || c.savedAt < Date.parse(p.updatedAt) || locked) { AsyncStorage.removeItem(CACHE(p.id)).catch(() => {}); return; }
+      setLetter(c.letter); setAnswers(c.answers); setBid(c.bid); setDuration(c.duration);
+      setRestored({ letter: p.coverLetter, answers: p.answers, bid: p.bid == null ? "" : String(p.bid), duration: p.estimatedDuration ?? "", savedAt: 0 });
+    }).catch(() => {});
+  }, [p, loadedAt, locked]);
 
   if (!p) {
     return <Screen header={false} padTop={false}>{q.loading ? <T muted>Loading…</T> : <Empty title="Proposal not found">{q.error ?? "It may have been removed."}</Empty>}</Screen>;
@@ -104,11 +192,36 @@ export default function ProposalEditor() {
 
   const st = PROPOSAL_STATUS[p.status];
   const idx = stepIndex(p.status);
-  const locked = p.status === "submitted" || p.status === "discarded";
   const screening = job.data?.enrichment?.screeningQuestions ?? [];
   const connects = job.data?.enrichment?.connectsCost ?? null;
   const upwork = (p.preview?.upwork ?? null) as Record<string, unknown> | null;
   const loomValid = LOOM_RE.test(loom.trim());
+  const hourly = job.data?.jobType === "HOURLY";
+  const apply = job.data ? applyUrl(job.data) : applyUrl({ url: p.jobUrl });
+  const pasteLetter = letterForUpwork(letter);
+  const notes = [letter, ...answers.map((a) => a.answer)].some((t) => findPlaceholders(t).length > 0);
+  const manual = p.preview?.manual === true;
+
+  /** Copy one field for Upwork. A field that still has a note to David is never copied. */
+  async function copy(key: string, text: string) {
+    const hits = findPlaceholders(text);
+    if (hits.length) {
+      haptic.error();
+      Alert.alert("Remove the note first", `This still contains ${hits.map((h) => `"${h}"`).join(", ")}. The client would see it.`);
+      return;
+    }
+    await Clipboard.setStringAsync(text);
+    haptic.success();
+    setCopied((prev) => ({ ...prev, [key]: true }));
+    if (dirty) void persist();
+  }
+
+  function sentOnUpwork() {
+    Alert.alert("Sent on Upwork?", "Mark this proposal as sent. Nothing is sent from the app - this only records that you applied.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Mark as sent", onPress: async () => { if (await persist()) run("applied", () => endpoints.markApplied(p!.id), { success: true }); } },
+    ]);
+  }
 
   async function run(label: string, fn: () => Promise<Proposal>, opts: { success?: boolean } = {}) {
     setBusy(label); setError(null);
@@ -127,8 +240,7 @@ export default function ProposalEditor() {
     }
   }
 
-  const save = () => run("save", () => endpoints.editProposal(p.id, { coverLetter: letter.slice(0, COVER_MAX), answers, bid: bid.trim() === "" ? null : Number(bid) }));
-  const saveIfDirty = async () => (dirty ? await save() : true);
+  const saveIfDirty = persist;
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={90}>
@@ -140,8 +252,14 @@ export default function ProposalEditor() {
           <T faint size={12}>updated {timeAgo(p.updatedAt)}{p.model ? ` · ${p.model}` : ""}</T>
         </Row>
         {idx >= 0 ? <Stepper idx={idx} /> : null}
-        <Banner tone="info">Nothing is sent to Upwork until you submit here.</Banner>
+        <Banner tone="info">Nothing is sent to Upwork from here unless you submit. Copy each part below and paste it into Upwork yourself.</Banner>
         {error ? <Banner tone="bad" title="That didn't work">{error}</Banner> : null}
+        {restored ? (
+          <Banner tone="warn" title="Restored edits from this phone" action={<Button small label="Use saved version" onPress={() => {
+            setLetter(restored.letter); setAnswers(restored.answers); setBid(restored.bid); setDuration(restored.duration);
+            setRestored(null); AsyncStorage.removeItem(CACHE(p.id)).catch(() => {});
+          }} />}>These edits hadn&apos;t reached the server. They save again in a moment.</Banner>
+        ) : null}
 
         {p.research ? (
           <>
@@ -167,10 +285,15 @@ export default function ProposalEditor() {
 
         <SectionTitle right={<T size={12} muted style={{ color: letter.length > COVER_MAX ? c.bad : c.muted, fontVariant: ["tabular-nums"] }}>{letter.length.toLocaleString("en-US")} / {COVER_MAX.toLocaleString("en-US")}</T>}>Cover letter</SectionTitle>
         <Field label="" value={letter} onChangeText={setLetter} multiline editable={!locked} maxLength={COVER_MAX} style={{ marginBottom: 4 }} />
-        {letter.includes(LOOM_PLACEHOLDER) ? <T size={12} style={{ color: c.warn, marginBottom: 12 }}>The letter still has the {LOOM_PLACEHOLDER} placeholder - attaching a Loom link fills it in.</T> : <View style={{ height: 8 }} />}
-        <Row gap={8} wrap style={{ marginBottom: 16 }}>
-          <Button small label="Copy" icon={(col) => <IconCopy size={16} color={col} />} onPress={async () => { await Clipboard.setStringAsync(letter); haptic.light(); }} />
-          {!locked ? <Button small label={dirty ? "Save changes" : "Saved"} variant={dirty ? "dark" : "default"} disabled={!dirty} loading={busy === "save"} onPress={save} /> : null}
+        <NoteWarning text={letter} />
+        {letter.includes(LOOM_PLACEHOLDER) ? <T size={12} style={{ color: c.warn, marginBottom: 12 }}>No Loom yet: the Loom line is left out when you copy. Attaching a Loom link fills it in.</T> : <View style={{ height: 8 }} />}
+        <Row gap={8} wrap style={{ marginBottom: 16, alignItems: "center" }}>
+          <Button small label={copied.letter ? "Copied" : "Copy"} icon={(col) => (copied.letter ? <IconCheck size={16} color={col} /> : <IconCopy size={16} color={col} />)} onPress={() => copy("letter", pasteLetter)} />
+          {!locked ? (
+            <T size={12} faint>
+              {saveState === "saving" ? "Saving…" : saveState === "offline" ? (bidValid ? "Not saved yet - kept on this phone, retrying" : "Fix the bid to save") : dirty ? "Edited" : "All changes saved"}
+            </T>
+          ) : null}
           {!locked ? (
             <Button small label={busy === "rewrite" ? "Rewriting…" : "Rewrite shorter"} loading={busy === "rewrite"} disabled={busy !== null}
               icon={(col) => <IconRefresh size={16} color={col} />} accessibilityLabel="Rewrite shorter"
@@ -187,16 +310,49 @@ export default function ProposalEditor() {
           <>
             <SectionTitle>Screening answers</SectionTitle>
             {answers.map((a, i) => (
-              <Field key={i} label={a.question} value={a.answer} multiline editable={!locked}
-                onChangeText={(t) => setAnswers((prev) => prev.map((x, j) => (j === i ? { ...x, answer: t } : x)))} />
+              <View key={i}>
+                <Field label={a.question} value={a.answer} multiline editable={!locked}
+                  onChangeText={(t) => setAnswers((prev) => prev.map((x, j) => (j === i ? { ...x, answer: t } : x)))} />
+                <NoteWarning text={a.answer} />
+              </View>
             ))}
           </>
         ) : null}
 
         <SectionTitle right={connects != null ? <Pill label={`${connects} Connects`} tone="info" /> : undefined}>Bid</SectionTitle>
-        <Field label="Amount (USD)" value={bid} onChangeText={(t) => setBid(t.replace(/[^0-9.]/g, ""))} keyboardType="decimal-pad" editable={!locked} placeholder="e.g. 4500" hint={p.bid != null ? `Saved: ${money(p.bid)}` : undefined} />
+        <Field label={hourly ? "Hourly rate (USD)" : "Amount (USD)"} value={bid} onChangeText={(t) => setBid(t.replace(/[^0-9.]/g, ""))} keyboardType="decimal-pad" editable={!locked} placeholder={hourly ? "e.g. 85" : "e.g. 4500"}
+          error={bidValid ? null : "Enter a number"} hint={p.bid != null ? `Saved: ${money(p.bid)}` : undefined} />
+        {!hourly ? (
+          <View style={{ gap: 6, marginBottom: 16 }}>
+            <T muted size={13} weight="medium">How long will this project take?</T>
+            <Seg scroll value={duration} options={DURATIONS.map((d) => ({ value: d as string, label: d }))} onChange={(v) => { if (!locked) { haptic.select(); setDuration(v); } }} />
+          </View>
+        ) : null}
 
-        <SectionTitle>Loom video</SectionTitle>
+        {!locked ? (
+          <>
+            <SectionTitle right={notes ? <Pill label="Has notes" tone="bad" /> : undefined}>Send on Upwork</SectionTitle>
+            <Card style={{ marginBottom: 16, gap: 10 }}>
+              <T muted size={13}>Open the apply page, then tap each part to copy it and paste it into the matching box on Upwork.</T>
+              <Row gap={8} wrap>
+                {apply ? <Button small variant="dark" label="Open apply page" icon={(col) => <IconExternal size={16} color={col} />} onPress={() => openUpwork(apply)} /> : null}
+                <Button small label="Open job" icon={(col) => <IconExternal size={16} color={col} />} onPress={() => openUpwork(p.jobUrl)} />
+              </Row>
+              <View>
+                <CopyRow label="Cover letter" preview={`${pasteLetter.length.toLocaleString("en-US")} chars · ${pasteLetter.split("\n")[0]}`} done={!!copied.letter} onPress={() => copy("letter", pasteLetter)} />
+                {answers.map((a, i) => (
+                  <CopyRow key={i} label={`Answer ${i + 1}`} preview={a.question} done={!!copied[`a${i}`]} onPress={() => copy(`a${i}`, a.answer)} />
+                ))}
+                {bid.trim() && bidValid ? <CopyRow label={hourly ? "Hourly rate" : "Bid"} preview={hourly ? `$${bid}/hr` : `$${bid}`} done={!!copied.bid} onPress={() => copy("bid", bid.trim())} /> : null}
+                {!hourly && duration ? <CopyRow label="Project length" preview={`${duration} - pick it in the list on Upwork`} done={!!copied.duration} onPress={() => copy("duration", duration)} /> : null}
+              </View>
+              <Button label="I sent it on Upwork" variant="accent" disabled={notes || busy !== null} loading={busy === "applied"} icon={(col) => <IconSend size={16} color={col} />} onPress={sentOnUpwork} />
+              {notes ? <T size={12} style={{ color: c.bad }}>Remove the notes marked in red first.</T> : null}
+            </Card>
+          </>
+        ) : null}
+
+        <SectionTitle>Or send from the app · Loom video</SectionTitle>
         <Card style={{ marginBottom: 16, gap: 4 }}>
           <Field label="Loom link (or branded short link)" value={loom} onChangeText={setLoom} placeholder="https://www.loom.com/share/…" autoCapitalize="none" autoCorrect={false} keyboardType="url" editable={!locked}
             error={loom.trim() && !loomValid ? "Paste a Loom share link or a short link that redirects to one" : null} />
@@ -222,7 +378,7 @@ export default function ProposalEditor() {
           </View>
         ) : null}
 
-        {p.status === "submitted" ? <Banner tone="good" title="Submitted">{p.submittedAt ? `Sent ${timeAgo(p.submittedAt)}.` : "Sent."}</Banner> : null}
+        {p.status === "submitted" ? <Banner tone="good" title={manual ? "Sent on Upwork" : "Submitted"}>{`${manual ? "You sent it on Upwork" : "Sent"}${p.submittedAt ? ` ${timeAgo(p.submittedAt)}` : ""}.`}</Banner> : null}
 
         <Card style={{ marginBottom: 16 }}>
           <FeedbackButtons kind="draft" refId={String(p.id)} label="Good draft?" data={{ promptVersion: p.promptVersion, model: p.model, status: p.status }} />

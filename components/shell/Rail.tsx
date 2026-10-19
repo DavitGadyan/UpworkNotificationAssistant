@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
-  IconBriefcase, IconChart, IconFlask, IconChat, IconClose, IconDoc, IconEye, IconFeed, IconGrid, IconMore, IconSettings, IconSpark,
+  IconBriefcase, IconChart, IconCoin, IconFlask, IconChat, IconClose, IconDoc, IconEye, IconFeed, IconGrid, IconMore, IconSettings, IconSpark,
 } from "@/components/icons";
 
 type Item = { href: string; label: string; short?: string; Icon: (p: { size?: number; className?: string }) => React.ReactElement };
@@ -21,6 +21,7 @@ const secondary: Item[] = [
   { href: "/insights/prompts", label: "Prompts", Icon: IconFlask },
   { href: "/feeds", label: "Feeds", Icon: IconFeed },
   { href: "/alerts", label: "Alerts log", Icon: IconChat },
+  { href: "/costs", label: "Costs", Icon: IconCoin },
   { href: "/settings", label: "Settings", Icon: IconSettings },
 ];
 

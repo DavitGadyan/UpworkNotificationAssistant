@@ -1,6 +1,26 @@
 import type { Job, JobCategory, JobEnrichment, LlmRanking, RankingRules, RuleFlag, RuleResult } from "../types";
 import { proposalsLow } from "../upwork/tiers";
 
+/**
+ * The client's hire count, or null when we don't actually know it (David, 2026-10-19). Upwork's keyword/saved-search
+ * rows carry total_posted_jobs and total_spent but NOT total_hires, which then arrives as 0 - and a client with
+ * $4.1M spent and 331 hires was labelled "mass poster, 0% hired". Money spent means hires happened, so a 0 next to
+ * spend > 0 without the client record is "unknown", never "never hires".
+ */
+export function knownHires(job: Pick<Job, "client">, e: JobEnrichment | null | undefined): number | null {
+  if (e?.record.hires != null) return e.record.hires;
+  const h = job.client.totalHires ?? 0;
+  if (h > 0) return h;
+  return (job.client.totalSpent ?? 0) > 0 ? null : 0;
+}
+
+/** Hire rate in percent (capped at 100: clients often hire several people per post), or null when unknown. */
+export function knownHireRate(job: Pick<Job, "client">, e: JobEnrichment | null | undefined): number | null {
+  if (e?.record.hireRatePercent != null) return Math.min(100, e.record.hireRatePercent);
+  const hires = knownHires(job, e), posted = e?.record.jobsPosted ?? job.client.totalPostedJobs ?? 0;
+  return hires == null || posted <= 0 ? null : Math.min(100, Math.round((hires / posted) * 100));
+}
+
 /*
  * JobRankingAssistant, stage A: David's hard business rules. Pure and deterministic.
  *
@@ -20,7 +40,7 @@ import { proposalsLow } from "../upwork/tiers";
 const has = (text: string, words: RegExp) => words.test(text);
 /* Title and Upwork skill tags. Stems end in \w* so "fine-tuning", "data scientist", "copywriting" match. */
 const CAT: [JobCategory, RegExp][] = [
-  ["mlops", /\b(mlops|ml ops|model (deployment|serving|monitoring)|sagemaker|vertex ai|kubeflow|mlflow|feature store|llmops)\b/i],
+  ["mlops", /\b(mlops|ml ops|aiops|ai ops|llmops|llm ops|(ai|ml|llm|model) (deployment|serving|monitoring|inference|infrastructure|infra)|inference (server|endpoint|optimi[sz]\w*)|sagemaker|vertex ai|bedrock|kubeflow|mlflow|feature store|vllm|triton)\b/i],
   ["ai", /\b(ai|llms?|gpt|chatgpt|openai|claude|anthropic|gemini|genai|gen ai|generative ai|rag|retrieval.augmented|langchain|langgraph|llamaindex|agentic|ai agents?|agent (development|framework|workflows?)|chatbots?|voice (ai|agents?)|machine learning|deep learning|nlp|computer vision|fine.?tun\w*|embeddings?|vector (db|database|store|search)|mcp)\b/i],
   ["devops", /\b(devops|kubernetes|k8s|terraform|ci\/cd|docker|aws infrastructure|gcp|azure|sre|helm|ansible)\b/i],
   ["saas", /\b(saas|mvp|web app|platform|full.?stack|dashboard|next\.?js|react|node\.?js|backend|api development)\b/i],
@@ -75,9 +95,41 @@ export function derive(job: Job, e?: JobEnrichment | null, now = new Date()) {
     avgPaid: hours && hours >= 10 ? Math.round(spend / hours) : null,
     avgPerContract: contracts && contracts > 0 ? Math.round(spend / contracts) : null,
     lastHireDays: starts.length ? Math.round((now.getTime() - Math.max(...starts)) / DAY) : null,
-    hireRate: e?.record.hireRatePercent ?? (job.client.totalPostedJobs > 0 && job.client.totalHires > 0
-      ? Math.round((job.client.totalHires / job.client.totalPostedJobs) * 100) : null),
+    hireRate: knownHireRate(job, e),
   };
+}
+
+/*
+ * Location requirements on the freelancer ("MUST BE UK BASED", "US-based candidates only", on-site / in-office work).
+ * David works remotely for clients worldwide and won't apply to these (2026-10-15): a red flag, a heavy penalty and
+ * no alert. Only requirement wording counts - "we are a UK company based in London" or "overlap with EST" do not.
+ */
+const PLACE = "(?:the\\s+)?(?:[A-Z]{2,3}|U\\.S\\.A?|U\\.K\\.|[A-Z][a-z]+(?:\\s+[A-Z][a-z]+){0,2})";
+const LOCATION_RULES: RegExp[] = [
+  new RegExp(`\\bmust\\s+be\\s+(?:in\\s+)?${PLACE}[- ]based\\b`, "i"),
+  /\b(?:must|should|need to|required to|have to)\s+(?:be\s+)?(?:currently\s+)?(?:be\s+)?(?:based|located|living|residing|reside|live|physically)\s+(?:in|within)\s+[^.,;\n]{2,40}/i,
+  new RegExp(`\\b${PLACE}[- ](?:based|located)\\s+(?:only|candidates?|freelancers?|applicants?|talent|developers?|engineers?|professionals?|individuals?)\\b`),
+  /\b(?:US|U\.S\.|USA|UK|EU|EEA)[- ](?:only|residents? only|citizens? only)\b/i,
+  /\b(?:US|U\.S\.|USA|UK|EU|American|British|Canadian|Australian)\s+(?:citizens?|residents?|citizenship)\s+(?:only|required|is required)\b/i,
+  /\b(?:only|exclusively)\s+(?:open to|accepting|considering|hiring)\s+(?:candidates|freelancers|applicants|people|talent)?\s*(?:from|in|based in|located in)\s+[^.,;\n]{2,40}/i,
+  /\b(?:on-?site|in[- ]person|in[- ]office)\b[^.\n]{0,60}\b(?:required|mandatory|only|days?\s+(?:a|per)\s+week|client site)\b/i,
+  /\bhybrid\b[^.\n]{0,40}\b(?:on-?site|in the office|office days?|days?\s+(?:a|per)\s+week)\b/i,
+  /\bremote[- ]only(?: delivery)? is not acceptable\b/i,
+];
+/** The requirement wording if the post restricts where the freelancer must be, else null. */
+export function locationRequirement(text: string): string | null {
+  for (const re of LOCATION_RULES) {
+    const m = text.match(re);
+    if (m) return m[0].trim().replace(/\s+/g, " ").slice(0, 80);
+  }
+  return null;
+}
+
+/** A new client is an account created at most 2 days ago. Zero hires alone is not "new" - it may be a dormant account. */
+export const NEW_CLIENT_DAYS = 2;
+export function isNewClient(e: JobEnrichment | null | undefined, now = new Date()): boolean {
+  const since = e?.clientSince ? new Date(e.clientSince).getTime() : NaN;
+  return Number.isFinite(since) && now.getTime() - since <= NEW_CLIENT_DAYS * DAY;
 }
 
 export function evaluateRules(job: Job, rules: RankingRules, ctx: RuleContext = {}): RuleResult {
@@ -103,11 +155,12 @@ export function evaluateRules(job: Job, rules: RankingRules, ctx: RuleContext = 
   }
 
   // ---------- payment ----------
-  const newClient = (e?.record.hires ?? job.client.totalHires) === 0;
+  const newClient = isNewClient(e, now);
+  const noHires = knownHires(job, e) === 0;
   if (job.client.paymentVerified === false) {
     const fit = ctx.llm?.fit ?? 0;
     if (newClient && fit >= rules.unverifiedExceptionFit && ctx.similarProject !== false) {
-      flag("unverified_new", "Payment not verified - new client, allowed because the fit is very tight", "amber", 6);
+      flag("unverified_new", `Payment not verified - account created ≤ ${NEW_CLIENT_DAYS} days ago, allowed because the fit is very tight`, "amber", 6);
     } else flag("unverified", "Payment method not verified", "red", 25);
   } else if (job.client.paymentVerified === true) passes.push("Payment verified");
 
@@ -140,7 +193,7 @@ export function evaluateRules(job: Job, rules: RankingRules, ctx: RuleContext = 
     if (d.hireRate != null) {
       if (d.hireRate >= rules.ai.minHireRate) passes.push(`Hire rate ${d.hireRate}%`);
       else flag("hire_rate", `Hire rate ${d.hireRate}% (AI work needs ≥ ${rules.ai.minHireRate}%)`, d.hireRate < 60 ? "red" : "amber", d.hireRate < 60 ? 15 : 8);
-    } else if (e && !newClient) flag("hire_rate_unknown", "Hire rate unknown", "info", 3);
+    } else if (e && !noHires) flag("hire_rate_unknown", "Hire rate unknown", "info", 3);
     if (d.avgPaid != null && d.avgPaid < rules.ai.minAvgPaid && !flags.some((f) => f.code === "cheap_history")) {
       flag("ai_avg_low", `Client averages ≈$${d.avgPaid}/hr (AI work needs ≥ $${rules.ai.minAvgPaid})`, "amber", 8);
     }
@@ -157,9 +210,12 @@ export function evaluateRules(job: Job, rules: RankingRules, ctx: RuleContext = 
     else if (d.hireRate < 50) flag("hire_rate", `Hire rate ${d.hireRate}%`, "amber", 8);
     else passes.push(`Hire rate ${d.hireRate}%`);
   }
+  const where = locationRequirement(`${job.title}\n${e?.description || job.description}`);
+  if (where) flag("location_restricted", `Location requirement: "${where}" - remote worldwide work only`, "red", 35);
+
   // A client with history but no loaded record: say so instead of showing "no flags".
   if (!e && !rejected && (job.client.totalSpent > 0 || job.client.totalHires > 0)) {
-    flag("no_record", "Client record not loaded yet - hire rate and rates unchecked", "info", 5);
+    flag("no_record", "Client record not loaded - hire rate and rates unchecked", "amber", 5);
   }
 
   // ---------- ignored open jobs ----------

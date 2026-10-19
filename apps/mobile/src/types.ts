@@ -138,6 +138,12 @@ export interface Settings {
   source: "auto" | "mcp" | "graphql";
   /** Ban-safety: per-cycle and per-day caps on Upwork calls, plus poll jitter. */
   guard: { maxEnrichPerCycle: number; dailyCallCap: number; jitterSec: number; minGapMs: number };
+  autoApply?: { enabled: boolean; timezone: string; start: string; end: string; maxPerNight: number; minRank: number; minFit: number; maxProposals: number; maxConnectsPerNight: number; minConnectsBalance: number; requireVerifiedPayment: boolean };
+  /** Who searches Upwork feeds: the Claude chat session or the worker - never both. */
+  upwork?: {
+    poller: "chat" | "worker";
+    peak?: { enabled: boolean; timezone: string; start: string; end: string; peakEveryMin: number; offPeakEveryMin: number; reservePct: number; learn: boolean };
+  };
   watch: { enabled: boolean; intervalMin: number; maxHours: number };
   /** provider: api = Claude API key; claude-cli = local Claude Code login (`claude -p`, subscription). */
   llm: {

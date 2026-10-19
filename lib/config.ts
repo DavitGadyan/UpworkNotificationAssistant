@@ -11,6 +11,12 @@ export const config = {
     authorizeUrl: "https://www.upwork.com/ab/account-security/oauth2/authorize",
     tokenUrl: "https://www.upwork.com/api/v3/oauth2/token",
     graphqlUrl: "https://api.upwork.com/graphql",
+    /**
+     * The API gateway on the GCP VM (gateway/server.ts, e.g. https://gw.s1mpleai.org). When set, every official-API
+     * call goes through it with this bearer token; the OAuth tokens live on the VM, never here.
+     */
+    gatewayUrl: (process.env.UPWORK_GATEWAY_URL ?? "").replace(/\/$/, ""),
+    gatewayToken: process.env.UPWORK_GATEWAY_TOKEN ?? "",
   },
   mcp: {
     url: process.env.UPWORK_MCP_URL ?? "https://mcp.upwork.com/mcp",

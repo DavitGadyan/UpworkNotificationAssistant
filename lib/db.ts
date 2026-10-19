@@ -30,7 +30,7 @@ export const DEFAULT_RULES: RankingRules = {
 };
 
 export const DEFAULT_SETTINGS: Settings = {
-  pollIntervalSec: 240,
+  pollIntervalSec: 300,
   alertsPaused: false,
   telegramEnabled: true,
   telegramMin: 60,
@@ -41,12 +41,17 @@ export const DEFAULT_SETTINGS: Settings = {
   quietHours: { enabled: true, start: "23:00", end: "08:00" },
   workingHours: { days: [1, 2, 3, 4, 5], start: "09:00", end: "18:00", timezone: process.env.DEFAULT_TIMEZONE ?? "UTC" },
   source: "auto",
-  guard: { maxEnrichPerCycle: 25, dailyCallCap: 2000, jitterSec: 30, minGapMs: 1500 },
-  watch: { enabled: true, intervalMin: 15, maxHours: 72 },
+  guard: { maxEnrichPerCycle: 5, dailyCallCap: 2800, jitterSec: 30, minGapMs: 4000 },
+  upwork: { poller: "chat", peak: { enabled: true, timezone: "Asia/Yerevan", start: "18:00", end: "01:00", peakEveryMin: 4, offPeakEveryMin: 7, reservePct: 60, learn: true } },
+  watch: { enabled: true, intervalMin: 60, maxHours: 72 },
   llm: { enabled: true, provider: "api", rankingModel: "claude-sonnet-5-5", writerModel: "claude-opus-5-5", maxRankPerCycle: 20, dailyBudgetUsd: 5, prepaidCreditUsd: null, creditSetAt: null },
   rules: DEFAULT_RULES,
   autoDraft: { enabled: true, minRank: 60, dailyCap: 10, perCycle: 3, webSearch: true },
   profileFit: { never: [], alsoMine: [] },
+  autoApply: {
+    enabled: false, timezone: "Asia/Yerevan", start: "00:00", end: "11:00",
+    maxPerNight: 6, minRank: 80, minFit: 75, maxProposals: 15, maxConnectsPerNight: 120, minConnectsBalance: 50, requireVerifiedPayment: true,
+  },
 };
 
 
@@ -76,17 +81,29 @@ export async function kvDel(...keys: string[]): Promise<void> {
 const jsv = (v: unknown) => JSON.stringify(v ?? null);
 
 // ---------- settings ----------
+/**
+ * Pacing floors and ceilings (Upwork restricted search on 2026-10-15 and 2026-10-17 for traffic). Applied on
+ * every read, so older stored values (240 s poll, 1.5-2 s gaps, 3,500 cap, 25 lookups, 15-min watch) can't come back.
+ */
+export const PACING_BOUNDS = { minPollSec: 300, maxDailyCap: 2800, minGapMs: 3000, maxEnrich: 10, minWatchMin: 30 };
+
 export function mergeSettings(s: Partial<Settings>): Settings {
+  const g = { ...DEFAULT_SETTINGS.guard, ...s.guard };
+  const w = { ...DEFAULT_SETTINGS.watch, ...s.watch };
+  const b = PACING_BOUNDS;
   return {
     ...DEFAULT_SETTINGS,
     ...s,
+    pollIntervalSec: Math.max(b.minPollSec, s.pollIntervalSec ?? DEFAULT_SETTINGS.pollIntervalSec),
     quietHours: { ...DEFAULT_SETTINGS.quietHours, ...s.quietHours },
     workingHours: { ...DEFAULT_SETTINGS.workingHours, ...s.workingHours },
-    guard: { ...DEFAULT_SETTINGS.guard, ...s.guard },
-    watch: { ...DEFAULT_SETTINGS.watch, ...s.watch },
+    guard: { ...g, dailyCallCap: Math.min(b.maxDailyCap, g.dailyCallCap), minGapMs: Math.max(b.minGapMs, g.minGapMs), maxEnrichPerCycle: Math.min(b.maxEnrich, g.maxEnrichPerCycle) },
+    upwork: { ...DEFAULT_SETTINGS.upwork, ...s.upwork, peak: { ...DEFAULT_SETTINGS.upwork.peak, ...s.upwork?.peak } },
+    watch: { ...w, intervalMin: Math.max(b.minWatchMin, w.intervalMin) },
     llm: { ...DEFAULT_SETTINGS.llm, ...s.llm },
     autoDraft: { ...DEFAULT_SETTINGS.autoDraft, ...s.autoDraft },
     profileFit: { ...DEFAULT_SETTINGS.profileFit, ...s.profileFit },
+    autoApply: { ...DEFAULT_SETTINGS.autoApply, ...s.autoApply },
     rules: {
       ...DEFAULT_RULES,
       ...s.rules,
@@ -299,7 +316,8 @@ export async function purgeExpired(now = Date.now()): Promise<{ jobs: number; no
   const jobs = await query(
     `delete from public.jobs where fetched_at < $1 and not keep
        and id not in (select job_id from public.proposals) and id not in (select job_id from public.job_watch where done is null)
-     returning id`, [cutoff],
+       and (status <> 'awaiting_payment' or fetched_at < $2)
+     returning id`, [cutoff, cutoff - 3 * 864e5], // a payment watch keeps its job up to 3 more days
   );
   const notifications = await query("delete from public.notifications where created_at < $1 returning id", [cutoff]);
   await query("delete from public.counters where day < $1", [new Date(now - 7 * 864e5).toISOString().slice(0, 10)]);
@@ -444,14 +462,40 @@ export async function listReports(kind: string, limit = 12): Promise<{ id: numbe
 }
 
 // ---------- MCP call log (ban-safety accounting) ----------
-export async function logMcpCall(tool: string, action: string | null, ok: boolean, ms: number, detail: string | null, now = Date.now()): Promise<void> {
+export interface CallHistoryMeta { source?: string; category?: string | null; errorClass?: string | null }
+let historyMissing = false;
+export async function logMcpCall(tool: string, action: string | null, ok: boolean, ms: number, detail: string | null, now = Date.now(), meta: CallHistoryMeta = {}): Promise<void> {
   await query("insert into public.mcp_log(tool, action, ok, ms, detail, created_at) values($1, $2, $3, $4, $5, $6)", [tool, action, ok, ms, detail, now]);
+  // Permanent history (migration 011). Until the migration runs the table is missing - never let that break a call.
+  if (historyMissing) return;
+  await query(
+    "insert into public.upwork_calls(created_at, source, tool, action, category, ok, error_class, ms, detail) values($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+    [now, meta.source ?? "app", tool, action, meta.category ?? null, ok, ok ? null : meta.errorClass ?? null, ms, detail],
+  ).catch((e) => { if (/upwork_calls/.test((e as Error).message)) historyMissing = true; else console.warn("call history", (e as Error).message); });
 }
 export async function mcpCallStats(since: number): Promise<{ total: number; failed: number; byTool: Record<string, number> }> {
   const rows = await query<{ tool: string; action: string | null; ok: boolean }>("select tool, action, ok from public.mcp_log where created_at >= $1", [since]);
   const byTool: Record<string, number> = {};
   rows.forEach((r) => { const k = r.action ? `${r.tool}.${r.action}` : r.tool; byTool[k] = (byTool[k] ?? 0) + 1; });
   return { total: rows.length, failed: rows.filter((r) => !r.ok).length, byTool };
+}
+
+/** Failed Upwork calls since `since` (ms), newest first - for the dashboard's error list. */
+export async function mcpFailures(since: number, limit = 200): Promise<{ at: number; tool: string; action: string | null; detail: string | null }[]> {
+  const rows = await query<{ created_at: string | number; tool: string; action: string | null; detail: string | null }>(
+    "select created_at, tool, action, detail from public.mcp_log where created_at >= $1 and not ok order by created_at desc limit $2", [since, limit]);
+  return rows.map((r) => ({ at: Number(r.created_at), tool: r.tool, action: r.action, detail: r.detail }));
+}
+
+/** Call counts since `since` (ms) for the pacing governor: all calls, job opens, and searches. */
+export async function mcpCallCounts(since: number): Promise<{ total: number; get: number; search: number }> {
+  const r = await one<{ total: number; get: number; search: number }>(
+    `select count(*)::int as total,
+            count(*) filter (where (tool = 'find_jobs' and action = 'get') or (tool = 'api' and action = 'job'))::int as get,
+            count(*) filter (where (tool = 'find_jobs' and action in ('search', 'smart_search')) or (tool = 'api' and action = 'search'))::int as search
+     from public.mcp_log where created_at >= $1`, [since],
+  );
+  return { total: r?.total ?? 0, get: r?.get ?? 0, search: r?.search ?? 0 };
 }
 
 // ---------- devices (Expo push) ----------

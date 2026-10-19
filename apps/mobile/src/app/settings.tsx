@@ -13,6 +13,18 @@ type Form = {
   alertsPaused: boolean;
   telegramMin: string;
   pollMin: string;
+  poller: "chat" | "worker";
+  source: "mcp" | "graphql";
+  aaOn: boolean;
+  aaStart: string;
+  aaEnd: string;
+  aaMax: string;
+  peakOn: boolean;
+  peakStart: string;
+  peakEnd: string;
+  peakTz: string;
+  peakMin: string;
+  offPeakMin: string;
   autoEnabled: boolean;
   autoMinRank: string;
   autoDailyCap: string;
@@ -41,6 +53,23 @@ const THEME_OPTIONS: { value: ThemePref; label: string }[] = [
   { value: "dark", label: "Dark" },
 ];
 
+const TZ_OPTIONS: { value: string; label: string }[] = [
+  { value: "Asia/Yerevan", label: "Yerevan" },
+  { value: "America/New_York", label: "New York" },
+  { value: "America/Los_Angeles", label: "Los Angeles" },
+  { value: "UTC", label: "UTC" },
+];
+
+const SOURCE_OPTIONS: { value: "mcp" | "graphql"; label: string }[] = [
+  { value: "graphql", label: "Official API" },
+  { value: "mcp", label: "MCP connector" },
+];
+
+const POLLER_OPTIONS: { value: "chat" | "worker"; label: string }[] = [
+  { value: "chat", label: "Claude session" },
+  { value: "worker", label: "Worker" },
+];
+
 export default function SettingsScreen() {
   const s = useSettings();
   const themePref = useThemePref();
@@ -56,6 +85,18 @@ export default function SettingsScreen() {
       alertsPaused: !!d.alertsPaused,
       telegramMin: String(d.telegramMin ?? 65),
       pollMin: String(Math.round((d.pollIntervalSec ?? 300) / 60)),
+      poller: d.upwork?.poller ?? "chat",
+      source: d.source === "graphql" ? "graphql" : "mcp",
+      aaOn: !!d.autoApply?.enabled,
+      aaStart: d.autoApply?.start ?? "00:00",
+      aaEnd: d.autoApply?.end ?? "11:00",
+      aaMax: String(d.autoApply?.maxPerNight ?? 6),
+      peakOn: d.upwork?.peak?.enabled ?? true,
+      peakStart: d.upwork?.peak?.start ?? "18:00",
+      peakEnd: d.upwork?.peak?.end ?? "01:00",
+      peakTz: d.upwork?.peak?.timezone ?? "Asia/Yerevan",
+      peakMin: String(d.upwork?.peak?.peakEveryMin ?? 4),
+      offPeakMin: String(d.upwork?.peak?.offPeakEveryMin ?? 7),
       autoEnabled: !!d.autoDraft?.enabled,
       autoMinRank: String(d.autoDraft?.minRank ?? 85),
       autoDailyCap: String(d.autoDraft?.dailyCap ?? 3),
@@ -69,8 +110,17 @@ export default function SettingsScreen() {
 
   async function save() {
     if (!form) return;
-    const telegramMin = int(form.telegramMin, 0, 100), poll = int(form.pollMin, 2, 120), minRank = int(form.autoMinRank, 0, 100), cap = int(form.autoDailyCap, 0, 50);
+    const telegramMin = int(form.telegramMin, 0, 100), poll = int(form.pollMin, 5, 60), minRank = int(form.autoMinRank, 0, 100), cap = int(form.autoDailyCap, 0, 50);
     const budget = Number(form.budget);
+    const peakMin = int(form.peakMin, 4, 30), offPeakMin = int(form.offPeakMin, 4, 60);
+    const hm = /^([01]\d|2[0-3]):[0-5]\d$/;
+    const aaMax = int(form.aaMax, 0, 20);
+    if (aaMax == null || !hm.test(form.aaStart) || !hm.test(form.aaEnd)) {
+      haptic.error(); setMsg({ tone: "bad", text: "Auto-apply: times must be HH:MM and max per night 0–20." }); return;
+    }
+    if (peakMin == null || offPeakMin == null || !hm.test(form.peakStart) || !hm.test(form.peakEnd)) {
+      haptic.error(); setMsg({ tone: "bad", text: "Peak: times must be HH:MM, peak 4–30 min, off-peak 4–60 min." }); return;
+    }
     if (telegramMin == null || poll == null || minRank == null || cap == null || !Number.isFinite(budget) || budget < 0) {
       haptic.error(); setMsg({ tone: "bad", text: "Check the numbers - one of them isn't valid." }); return;
     }
@@ -81,6 +131,9 @@ export default function SettingsScreen() {
         alertsPaused: form.alertsPaused,
         telegramMin,
         pollIntervalSec: poll * 60,
+        autoApply: { enabled: form.aaOn, start: form.aaStart, end: form.aaEnd, maxPerNight: aaMax },
+        source: form.source,
+        upwork: { poller: form.poller, peak: { enabled: form.peakOn, start: form.peakStart, end: form.peakEnd, timezone: form.peakTz, peakEveryMin: peakMin, offPeakEveryMin: offPeakMin } },
         autoDraft: { enabled: form.autoEnabled, minRank, dailyCap: cap },
         llm: { dailyBudgetUsd: Math.round(budget * 100) / 100 },
         profileFit: { alsoMine: phrases(form.alsoMine), never: phrases(form.never) },
@@ -113,7 +166,45 @@ export default function SettingsScreen() {
             <SwitchRow label="Pause all alerts" sub="No pushes, messages or calls until resumed" value={form.alertsPaused} onChange={(v) => set("alertsPaused", v)} />
             <Divider />
             <Field label="Alert at rank ≥" value={form.telegramMin} onChangeText={(t) => set("telegramMin", t.replace(/\D/g, ""))} keyboardType="number-pad" hint="Jobs ranked at or above this send an alert (0–100)" style={{ marginTop: 8 }} />
-            <Field label="Poll every (minutes)" value={form.pollMin} onChangeText={(t) => set("pollMin", t.replace(/\D/g, ""))} keyboardType="number-pad" hint="2–120. Shorter = faster alerts, more marketplace calls" />
+            <Field label="Poll every (minutes)" value={form.pollMin} onChangeText={(t) => set("pollMin", t.replace(/\D/g, ""))} keyboardType="number-pad" hint="5–60, worker only. Upwork restricted search twice for too many calls" />
+          </Card>
+
+          <SectionTitle>Upwork connection</SectionTitle>
+          <Card style={{ marginBottom: 16, gap: 10 }}>
+            <Seg value={form.source} options={SOURCE_OPTIONS} onChange={(v) => { haptic.select(); set("source", v); }} />
+            <T faint size={12}>Official API: searches and client details through your API key and the gateway (no Best Matches). MCP: everything through the Upwork connector. Proposals are submitted through MCP either way.</T>
+          </Card>
+
+          <SectionTitle>Who searches Upwork</SectionTitle>
+          <Card style={{ marginBottom: 16, gap: 10 }}>
+            <Seg value={form.poller} options={POLLER_OPTIONS} onChange={(v) => { haptic.select(); set("poller", v); }} />
+            <T faint size={12}>Only one searcher at a time - the other is refused by the pacing governor, so calls never double up.</T>
+          </Card>
+
+          <SectionTitle>Auto-apply at night</SectionTitle>
+          <Card style={{ marginBottom: 16 }}>
+            <SwitchRow label="Submit proposals while I sleep" sub="No Loom video · spends Connects · limits on the web Settings page" value={form.aaOn} onChange={(v) => set("aaOn", v)} />
+            <Divider />
+            <Row gap={10} style={{ marginTop: 8 }}>
+              <Field label="Night starts" value={form.aaStart} onChangeText={(t) => set("aaStart", t)} placeholder="00:00" style={{ flex: 1 }} />
+              <Field label="Night ends" value={form.aaEnd} onChangeText={(t) => set("aaEnd", t)} placeholder="11:00" style={{ flex: 1 }} />
+              <Field label="Max / night" value={form.aaMax} onChangeText={(t) => set("aaMax", t.replace(/\D/g, ""))} keyboardType="number-pad" style={{ flex: 1 }} />
+            </Row>
+          </Card>
+
+          <SectionTitle>Evening peak</SectionTitle>
+          <Card style={{ marginBottom: 16 }}>
+            <SwitchRow label="Search faster in the peak" sub="High-value US clients post from about 18:00 Armenian time" value={form.peakOn} onChange={(v) => set("peakOn", v)} />
+            <Divider />
+            <Row gap={10} style={{ marginTop: 8 }}>
+              <Field label="Peak starts" value={form.peakStart} onChangeText={(t) => set("peakStart", t)} placeholder="18:00" style={{ flex: 1 }} />
+              <Field label="Peak ends" value={form.peakEnd} onChangeText={(t) => set("peakEnd", t)} placeholder="01:00" style={{ flex: 1 }} />
+            </Row>
+            <Seg value={form.peakTz} options={TZ_OPTIONS.some((o) => o.value === form.peakTz) ? TZ_OPTIONS : [{ value: form.peakTz, label: form.peakTz }, ...TZ_OPTIONS]} onChange={(v) => { haptic.select(); set("peakTz", v); }} />
+            <Row gap={10} style={{ marginTop: 8 }}>
+              <Field label="Peak: every (min)" value={form.peakMin} onChangeText={(t) => set("peakMin", t.replace(/\D/g, ""))} keyboardType="number-pad" hint="4–30" style={{ flex: 1 }} />
+              <Field label="Off-peak: every (min)" value={form.offPeakMin} onChangeText={(t) => set("offPeakMin", t.replace(/\D/g, ""))} keyboardType="number-pad" hint="4–60" style={{ flex: 1 }} />
+            </Row>
           </Card>
 
           <SectionTitle>Auto-draft</SectionTitle>
