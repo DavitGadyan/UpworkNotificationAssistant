@@ -186,6 +186,8 @@ export function SettingsForm({ initial, timezones, configured }: {
               <Num label="Peak: each feed every (min, 4–30)" min={4} max={30} value={s.upwork.peak.peakEveryMin} onChange={(v) => setPeak({ peakEveryMin: v })} />
               <Num label="Off-peak: each feed every (min, 4–60)" min={4} max={60} value={s.upwork.peak.offPeakEveryMin} onChange={(v) => setPeak({ offPeakEveryMin: v })} />
               <Num label="Budget kept for the peak (%, 0–90)" min={0} max={90} value={s.upwork.peak.reservePct} onChange={(v) => setPeak({ reservePct: v })} />
+              <Num label="Back to normal after a warning (min, 10–240)" min={10} max={240} value={s.upwork.recoverAfterMin ?? 30} onChange={(v) => setS({ ...s, upwork: { ...s.upwork, recoverAfterMin: v } })} />
+              <Num label="Job opens per day (60–600, resets 04:00)" min={60} max={600} value={s.upwork.jobOpensPerDay ?? 500} onChange={(v) => setS({ ...s, upwork: { ...s.upwork, jobOpensPerDay: v } })} />
             </div>
             <label className="flex items-center gap-3"><input type="checkbox" className="size-4" checked={s.upwork.peak.learn} onChange={(e) => setPeak({ learn: e.target.checked })} />Learn: also treat hours where high-value jobs actually appear as peak (after 7 days of data)</label>
           </fieldset>

@@ -9,7 +9,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { callReport, errorClass, type CallRow } from "@/lib/callHistory";
 import { query } from "@/lib/pg";
-import { dailyCap, LIMITS } from "@/lib/upwork/governor";
+import { dailyCap, getsPerDay, LIMITS } from "@/lib/upwork/governor";
 
 type Logged = CallRow & { id: number; ms: number };
 
@@ -50,7 +50,7 @@ async function report(): Promise<number> {
     "Calls per day": `${await dailyCap()} (hard cap ${LIMITS.hardDailyCap})`,
     "Calls per hour": LIMITS.hourly,
     "Searches per day": LIMITS.searchPerDay,
-    "Job opens per day": LIMITS.getPerDay,
+    "Job opens per day": `${await getsPerDay()} (Settings, 60–300)`,
     "Same job re-opened": `at most once per ${LIMITS.sameJobMs / 36e5} h, never after a refusal`,
   };
   writeFileSync("docs/upwork-call-history.md", callReport(rows, limits) + "\n");

@@ -67,7 +67,7 @@ export function timeUntil(ms: number, now = Date.now()): string {
 
 export const PROPOSAL_STATUS: Record<string, { label: string; cls: string }> = {
   draft: { label: "Draft", cls: "pill-neutral" },
-  needs_loom: { label: "Needs Loom", cls: "pill-warn" },
+  needs_loom: { label: "To review", cls: "pill-warn" },
   ready: { label: "Ready to approve", cls: "pill-info" },
   approved: { label: "Approved", cls: "pill-info" },
   previewed: { label: "Previewed", cls: "pill-good" },

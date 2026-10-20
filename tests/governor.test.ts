@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createSearch, getSettings, insertJob, logMcpCall, resetDbForTests, saveSettings, startWatch } from "@/lib/db";
 import { demoJobs } from "@/lib/fixtures";
 import { scoreJob } from "@/lib/scoring";
-import { cadenceMs, classify, decide, governorStatus, isHighValue, learnedPeakHours, LIMITS, nextCategory, noteJobs, record, resume } from "@/lib/upwork/governor";
+import { cadenceMs, classify, coolDown, decide, governorStatus, isHighValue, learnedPeakHours, LIMITS, nextCategory, noteJobs, record, resume } from "@/lib/upwork/governor";
 
 // Midday local time, so the "ahead of the day's pace" check is predictable.
 const NOON = (() => { const d = new Date(); d.setHours(12, 0, 0, 0); return d.getTime(); })();
@@ -72,8 +72,38 @@ describe("pacing governor", () => {
     for (let i = 0; i < 5; i++) await record("find_jobs.search", false, "503", meta, { nowMs: NOON + 6 * MIN });
     expect((await governorStatus(NOON + 6 * MIN)).level).toBe(LIMITS.maxLevel);
     expect(cadenceMs(LIMITS.maxLevel)).toBe(40 * MIN);
-    // Two clean hours lower it one step.
-    expect((await governorStatus(NOON + 6 * MIN + LIMITS.decayMs)).level).toBe(LIMITS.maxLevel - 1);
+    // Still slow inside the recovery window; 30 clean minutes after the last warning → normal schedule again.
+    expect((await governorStatus(NOON + 35 * MIN)).level).toBe(LIMITS.maxLevel);
+    expect((await governorStatus(NOON + 37 * MIN)).level).toBe(0);
+  });
+
+  it("cools down for David: no calls for the period, then the normal schedule if nothing failed", async () => {
+    const meta = { feed: true, category: "keyword" };
+    for (let i = 0; i < 2; i++) await record("find_jobs.smart_search", false, "Streamable HTTP error: 503", { feed: true, category: "most_recent" }, { nowMs: NOON });
+    expect((await governorStatus(NOON)).level).toBe(2);
+    await coolDown(30, NOON + MIN);
+    expect(await decide("find_jobs.search", meta, "chat", NOON + 20 * MIN)).toMatchObject({ go: false, reason: expect.stringMatching(/cool-down/) });
+    expect((await governorStatus(NOON + 32 * MIN)).level).toBe(0);
+    expect(await decide("find_jobs.search", meta, "chat", NOON + 32 * MIN)).toEqual({ go: true });
+    // A warning during the cool-down keeps the slow-down level.
+    await record("find_jobs.search", false, "429", meta, { nowMs: NOON + 33 * MIN });
+    await coolDown(30, NOON + 34 * MIN);
+    await record("find_jobs.search", false, "503", meta, { nowMs: NOON + 40 * MIN });
+    expect((await governorStatus(NOON + 65 * MIN)).level).toBeGreaterThan(0);
+  });
+
+  it("re-checks 30 min after a warning and goes straight back to the normal schedule if nothing new happened", async () => {
+    const meta = { feed: true, category: "most_recent" };
+    await record("find_jobs.smart_search", false, "Streamable HTTP error: <!DOCTYPE html> 503", meta, { nowMs: NOON });
+    await record("find_jobs.smart_search", false, "find_jobs: 429 Too Many Requests", meta, { nowMs: NOON + 5 * MIN });
+    expect((await governorStatus(NOON + 34 * MIN)).storedLevel).toBe(2);
+    expect((await governorStatus(NOON + 36 * MIN)).storedLevel).toBe(0);
+    // The window is a setting.
+    const st = await getSettings();
+    await saveSettings({ upwork: { ...st.upwork, recoverAfterMin: 60 } });
+    await record("find_jobs.smart_search", false, "503", meta, { nowMs: NOON + 40 * MIN });
+    expect((await governorStatus(NOON + 80 * MIN)).storedLevel).toBe(3);
+    expect((await governorStatus(NOON + 101 * MIN)).storedLevel).toBe(0);
   });
 
   it("never re-opens a refused job, spaces job opens, and pauses all opens after 'too quickly'", async () => {
@@ -96,13 +126,26 @@ describe("pacing governor", () => {
     await peakOff();
     await logCalls(LIMITS.getPerDay, NOON - 5 * 36e5, "find_jobs", "get");
     expect(await decide("find_jobs.get", { jobId: "x" }, "worker", NOON)).toMatchObject({ go: false, reason: expect.stringContaining("job-open budget") });
+    // The job-open cap is a setting (60–600, default 500): raising it lets the next open through, values above 600 are clamped.
+    const up = (await getSettings()).upwork;
+    await saveSettings({ upwork: { ...up, jobOpensPerDay: 600 } });
+    expect(await decide("find_jobs.get", { jobId: "x" }, "worker", NOON)).toEqual({ go: true });
+    // The counters reset at 00:00 UTC (04:00 Asia/Yerevan) - the next day starts from zero at the default cap.
+    await saveSettings({ upwork: { ...up, jobOpensPerDay: LIMITS.getPerDay } });
+    const d = new Date(NOON);
+    const nextDay = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) + 864e5 + 36e5; // 01:00 UTC the day after NOON's calls
+    expect(await decide("find_jobs.get", { jobId: "y" }, "worker", nextDay)).toEqual({ go: true });
+    expect((await governorStatus(nextDay)).budgets.get.used).toBe(0);
+    await saveSettings({ upwork: { ...up, jobOpensPerDay: 5000 } });
+    expect((await governorStatus(NOON)).budgets.get.cap).toBe(600);
+    await saveSettings({ upwork: { ...up, jobOpensPerDay: LIMITS.getPerDay } });
 
     await peakOff();
     await saveSettings({ guard: { maxEnrichPerCycle: 5, dailyCallCap: 9999, jitterSec: 30, minGapMs: 4000 } });
     expect((await getSettings()).guard.dailyCallCap).toBe(2800); // stored values above the ceiling are clamped
     await saveSettings({ guard: { maxEnrichPerCycle: 5, dailyCallCap: 100, jitterSec: 30, minGapMs: 4000 } });
     await logCalls(100, NOON - 5 * 36e5, "get_messages", "list_rooms");
-    expect(await decide("get_messages.list_rooms", {}, "worker", NOON)).toMatchObject({ go: false, reason: expect.stringContaining("24 h budget") });
+    expect(await decide("get_messages.list_rooms", {}, "worker", NOON)).toMatchObject({ go: false, reason: expect.stringContaining("day budget") });
   });
 
   it("slows down when the day's calls run ahead of an even pace", async () => {

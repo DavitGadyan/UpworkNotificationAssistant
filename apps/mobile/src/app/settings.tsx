@@ -25,6 +25,8 @@ type Form = {
   peakTz: string;
   peakMin: string;
   offPeakMin: string;
+  recoverMin: string;
+  opensPerDay: string;
   autoEnabled: boolean;
   autoMinRank: string;
   autoDailyCap: string;
@@ -97,6 +99,8 @@ export default function SettingsScreen() {
       peakTz: d.upwork?.peak?.timezone ?? "Asia/Yerevan",
       peakMin: String(d.upwork?.peak?.peakEveryMin ?? 4),
       offPeakMin: String(d.upwork?.peak?.offPeakEveryMin ?? 7),
+      recoverMin: String(d.upwork?.recoverAfterMin ?? 30),
+      opensPerDay: String(d.upwork?.jobOpensPerDay ?? 500),
       autoEnabled: !!d.autoDraft?.enabled,
       autoMinRank: String(d.autoDraft?.minRank ?? 85),
       autoDailyCap: String(d.autoDraft?.dailyCap ?? 3),
@@ -112,14 +116,14 @@ export default function SettingsScreen() {
     if (!form) return;
     const telegramMin = int(form.telegramMin, 0, 100), poll = int(form.pollMin, 5, 60), minRank = int(form.autoMinRank, 0, 100), cap = int(form.autoDailyCap, 0, 50);
     const budget = Number(form.budget);
-    const peakMin = int(form.peakMin, 4, 30), offPeakMin = int(form.offPeakMin, 4, 60);
+    const peakMin = int(form.peakMin, 4, 30), offPeakMin = int(form.offPeakMin, 4, 60), recoverMin = int(form.recoverMin, 10, 240), opensPerDay = int(form.opensPerDay, 60, 600);
     const hm = /^([01]\d|2[0-3]):[0-5]\d$/;
     const aaMax = int(form.aaMax, 0, 20);
     if (aaMax == null || !hm.test(form.aaStart) || !hm.test(form.aaEnd)) {
       haptic.error(); setMsg({ tone: "bad", text: "Auto-apply: times must be HH:MM and max per night 0–20." }); return;
     }
-    if (peakMin == null || offPeakMin == null || !hm.test(form.peakStart) || !hm.test(form.peakEnd)) {
-      haptic.error(); setMsg({ tone: "bad", text: "Peak: times must be HH:MM, peak 4–30 min, off-peak 4–60 min." }); return;
+    if (peakMin == null || offPeakMin == null || recoverMin == null || opensPerDay == null || !hm.test(form.peakStart) || !hm.test(form.peakEnd)) {
+      haptic.error(); setMsg({ tone: "bad", text: "Peak: times must be HH:MM, peak 4–30 min, off-peak 4–60 min, back to normal 10–240 min, job opens 60–300." }); return;
     }
     if (telegramMin == null || poll == null || minRank == null || cap == null || !Number.isFinite(budget) || budget < 0) {
       haptic.error(); setMsg({ tone: "bad", text: "Check the numbers - one of them isn't valid." }); return;
@@ -133,7 +137,7 @@ export default function SettingsScreen() {
         pollIntervalSec: poll * 60,
         autoApply: { enabled: form.aaOn, start: form.aaStart, end: form.aaEnd, maxPerNight: aaMax },
         source: form.source,
-        upwork: { poller: form.poller, peak: { enabled: form.peakOn, start: form.peakStart, end: form.peakEnd, timezone: form.peakTz, peakEveryMin: peakMin, offPeakEveryMin: offPeakMin } },
+        upwork: { poller: form.poller, peak: { enabled: form.peakOn, start: form.peakStart, end: form.peakEnd, timezone: form.peakTz, peakEveryMin: peakMin, offPeakEveryMin: offPeakMin }, recoverAfterMin: recoverMin, jobOpensPerDay: opensPerDay },
         autoDraft: { enabled: form.autoEnabled, minRank, dailyCap: cap },
         llm: { dailyBudgetUsd: Math.round(budget * 100) / 100 },
         profileFit: { alsoMine: phrases(form.alsoMine), never: phrases(form.never) },
@@ -205,6 +209,10 @@ export default function SettingsScreen() {
               <Field label="Peak: every (min)" value={form.peakMin} onChangeText={(t) => set("peakMin", t.replace(/\D/g, ""))} keyboardType="number-pad" hint="4–30" style={{ flex: 1 }} />
               <Field label="Off-peak: every (min)" value={form.offPeakMin} onChangeText={(t) => set("offPeakMin", t.replace(/\D/g, ""))} keyboardType="number-pad" hint="4–60" style={{ flex: 1 }} />
             </Row>
+            <Field label="Back to normal after a warning (min)" value={form.recoverMin} onChangeText={(t) => set("recoverMin", t.replace(/\D/g, ""))} keyboardType="number-pad"
+              hint="10–240. After Upwork slows us down, the watcher re-checks this long after the last warning and returns to the times above." />
+            <Field label="Job opens per day" value={form.opensPerDay} onChangeText={(t) => set("opensPerDay", t.replace(/\D/g, ""))} keyboardType="number-pad"
+              hint="60–300. Opening a job shows the client's history. Clean days peaked near 380; Upwork started throttling near 750." />
           </Card>
 
           <SectionTitle>Auto-draft</SectionTitle>

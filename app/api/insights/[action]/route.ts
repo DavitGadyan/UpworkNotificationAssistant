@@ -4,6 +4,7 @@ import { buildGhostReport } from "@/lib/insights/ghosts";
 import { benchmarkPeers, monthlyReview, monthlySnapshot, saveManualMetrics, syncProfile } from "@/lib/insights/metrics";
 import { bad, json } from "@/lib/http";
 import { buildLessons, decideLessons } from "@/lib/learning/lessons";
+import { buildNightlyReview } from "@/lib/learning/review";
 import { syncProposalOutcomes } from "@/lib/learning/outcomes";
 import { saveLabReport, updateLabConfig } from "@/lib/learning/promptLab";
 
@@ -25,6 +26,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ action:
       case "ghosts": return json(await buildGhostReport());
       case "apply-calibration": return json({ applied: await applyCalibration() });
       case "outcomes": return json(await syncProposalOutcomes({ maxCalls: 60 }));
+      case "nightly-review": return json(await buildNightlyReview());
       case "lessons": return json(await buildLessons(Date.now(), b.target === "ranker" ? "ranker" : "writer"));
       case "approve-lessons": return json(await decideLessons(Number(b.reportId), "approved", Array.isArray(b.ids) ? b.ids.map(String) : undefined));
       case "reject-lessons": return json(await decideLessons(Number(b.reportId), "rejected"));

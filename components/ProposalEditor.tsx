@@ -35,7 +35,7 @@ function PlaceholderWarning({ text }: { text: string }) {
 
 type Action = "save" | "loom" | "approve" | "preview" | "submit" | "discard" | "rewrite";
 
-/** The full submit gate on one page: edit → Loom → approve → Upwork preview → typed SUBMIT. */
+/** The full submit gate on one page: edit → (optional Loom) → approve → Upwork preview → typed SUBMIT. */
 export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { initial: Proposal; screeningQuestions: string[]; connectsCost: number | null }) {
   const router = useRouter();
   const [p, setP] = useState(initial);
@@ -172,11 +172,11 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
     return call(a, `/api/proposals/${p.id}/${a}`, { method: "POST", body: JSON.stringify(body ?? {}) }, done);
   };
 
-  // Stepper
+  // Stepper (a Loom video is optional, so it is not a step - David, 2026-10-20)
   const has = (...s: Proposal["status"][]) => s.includes(p.status);
+  const canApprove = has("ready", "needs_loom", "draft");
   const steps = [
     { label: "Draft", done: true },
-    { label: "Loom", done: !!p.loomUrl },
     { label: "Approved", done: has("approved", "previewed", "submitted") },
     { label: "Preview", done: has("previewed", "submitted") },
     { label: "Submitted", done: has("submitted") },
@@ -191,7 +191,7 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
     <div className="grid gap-4">
       {/* Stepper */}
       <section className="card p-4 md:p-5" aria-label="Progress">
-        <ol className="grid grid-cols-5 gap-1.5">
+        <ol className="grid grid-cols-4 gap-1.5">
           {steps.map((s, i) => {
             const isCur = i === current && !locked;
             return (
@@ -237,7 +237,7 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
               <Note tone="warn" className="mt-3">Restored edits this browser kept from {fmtDateTime(new Date(restored.savedAt).toISOString())} that never reached the server. They save now.{" "}
                 <button type="button" className="underline" onClick={undoRestore}>Undo</button></Note>
             )}
-            {cover.includes(LOOM_PLACEHOLDER) && <Note tone="warn" className="mt-3">The letter still contains the {LOOM_PLACEHOLDER} placeholder. Attaching your Loom link replaces it.</Note>}
+            {cover.includes(LOOM_PLACEHOLDER) && <Note className="mt-3">No Loom yet: attaching a link fills the {LOOM_PLACEHOLDER} line; approving without one removes the line.</Note>}
             <textarea
               aria-label="Cover letter" className="input mt-4 min-h-[340px] py-3 leading-relaxed md:min-h-[440px]" value={cover} maxLength={MAX} disabled={locked}
               onChange={(e) => setCover(e.target.value)}
@@ -288,11 +288,11 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
         <div className="grid min-w-0 gap-4">
           <section className="card p-5 md:p-6" aria-labelledby="gate-h">
             <h2 id="gate-h" className="display text-[20px] font-semibold">Send it</h2>
-            <p className="mt-1 text-[14px] text-[var(--color-muted)]">Four steps, each one yours. Nothing is sent to Upwork until you submit here.</p>
+            <p className="mt-1 text-[14px] text-[var(--color-muted)]">Three steps, each one yours. Nothing is sent to Upwork until you submit here.</p>
 
-            {/* 1. Loom */}
+            {/* Loom (optional) */}
             <div className="mt-5 border-t border-[var(--color-line)] pt-4">
-              <p className="flex items-center gap-2 font-medium"><Num n={1} done={!!p.loomUrl} />Loom video</p>
+              <p className="flex items-center gap-2 font-medium"><Num n={0} done={!!p.loomUrl} />Loom video <span className="text-[13px] font-normal text-[var(--color-muted)]">optional, usually preferred</span></p>
               <form className="mt-3 flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); act("loom", { url: loom.trim() }, "Loom attached"); }}>
                 <label className="sr-only" htmlFor="loom">Loom share link</label>
                 <input id="loom" className="input" type="url" inputMode="url" value={loom} disabled={locked} onChange={(e) => setLoom(e.target.value)} placeholder="https://www.loom.com/share/…" />
@@ -309,17 +309,17 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
 
             {/* 2. Approve */}
             <div className="mt-4 border-t border-[var(--color-line)] pt-4">
-              <p className="flex items-center gap-2 font-medium"><Num n={2} done={has("approved", "previewed", "submitted")} />Approve the final text</p>
-              <button type="button" className="btn btn-sm mt-3" disabled={locked || !p.loomUrl || p.status !== "ready" || busy === "approve"} onClick={() => act("approve", undefined, "Approved")}>
+              <p className="flex items-center gap-2 font-medium"><Num n={1} done={has("approved", "previewed", "submitted")} />Approve the final text</p>
+              <button type="button" className="btn btn-sm mt-3" disabled={locked || !canApprove || busy === "approve"} onClick={() => act("approve", undefined, "Approved")}>
                 {busy === "approve" ? <Spinner /> : <IconCheck size={16} />}{has("approved", "previewed") ? `Approved ${p.approvedAt ? fmtDateTime(p.approvedAt) : ""}` : "Approve"}
               </button>
-              <p className="mt-2 text-[13px] text-[var(--color-muted)]">{!p.loomUrl ? "Attach the Loom first." : p.status === "ready" ? "Approving saves your latest edits first and records how much you edited the draft." : ""}</p>
+              <p className="mt-2 text-[13px] text-[var(--color-muted)]">{canApprove ? `Approving saves your latest edits first and records how much you edited the draft.${p.loomUrl ? "" : " No Loom attached: the Loom line is removed from the letter."}` : ""}</p>
               {err("approve")}
             </div>
 
             {/* 3. Preview */}
             <div className="mt-4 border-t border-[var(--color-line)] pt-4">
-              <p className="flex items-center gap-2 font-medium"><Num n={3} done={has("previewed", "submitted")} />Build Upwork preview</p>
+              <p className="flex items-center gap-2 font-medium"><Num n={2} done={has("previewed", "submitted")} />Build Upwork preview</p>
               <button type="button" className="btn btn-sm mt-3" disabled={locked || p.status !== "approved" || busy === "preview"} onClick={() => act("preview", undefined, "Preview ready")}>
                 {busy === "preview" ? <><Spinner />Building…</> : "Build Upwork preview"}
               </button>
@@ -329,7 +329,7 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
 
             {/* 4. Submit */}
             <div className="mt-4 border-t border-[var(--color-line)] pt-4">
-              <p className="flex items-center gap-2 font-medium"><Num n={4} done={has("submitted")} />Submit</p>
+              <p className="flex items-center gap-2 font-medium"><Num n={3} done={has("submitted")} />Submit</p>
               {!confirming ? (
                 <button type="button" className="btn btn-accent mt-3" disabled={locked || p.status !== "previewed"} onClick={() => { setConfirming(true); setTyped(""); }}>
                   <IconSend size={16} />Submit to Upwork…
@@ -400,10 +400,11 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
   );
 }
 
+/** Step number; n = 0 is the optional Loom row (shown as a link icon, never a number). */
 function Num({ n, done }: { n: number; done: boolean }) {
   return (
     <span className={`grid size-6 shrink-0 place-items-center rounded-full text-[12px] font-semibold ${done ? "bg-[var(--color-good)] text-[var(--color-surface)]" : "bg-[var(--color-control)] text-[var(--color-ink)]"}`}>
-      {done ? <IconCheck size={13} /> : n}
+      {done ? <IconCheck size={13} /> : n === 0 ? <IconLink size={13} /> : n}
     </span>
   );
 }

@@ -60,7 +60,7 @@ describe("retention and pipeline", () => {
 describe("proposal gate and preference loop", () => {
   beforeEach(() => resetDbForTests());
 
-  it("never lets a draft through without a Loom link, approval, preview and the SUBMIT confirmation", async () => {
+  it("never lets a draft through without approval, preview and the SUBMIT confirmation; a Loom is optional", async () => {
     const { createProposal } = await import("@/lib/db");
     const { approve, attachLoom, editDraft, preview, submit } = await import("@/lib/proposals/submit");
     const p = await createProposal({
@@ -69,7 +69,6 @@ describe("proposal gate and preference loop", () => {
       estimatedDuration: null, portfolioProjectIds: [], loomUrl: null, approvedAt: null, preview: null, previewId: null,
       submittedAt: null, originalDraft: "Hi Alan,\n\nLOOM VIDEO: {{LOOM_URL}}\nBUDGET: $5,000", model: "m", promptVersion: null,
     });
-    await expect(approve(p.id)).rejects.toThrow(/Loom/);
     await expect(preview(p.id)).rejects.toThrow(/Approve/);
     await expect(submit(p.id, "SUBMIT")).rejects.toThrow(/preview/);
     await expect(attachLoom(p.id, "https://youtube.com/watch?v=1")).rejects.toThrow(/Loom share link/);
@@ -89,6 +88,34 @@ describe("proposal gate and preference loop", () => {
     await expect(approve(p.id)).rejects.toThrow(/Answer 1 still has a note to you/);
     await editDraft(p.id, { answers: [{ question: "Q", answer: "Shipped it." }] });
     expect((await approve(p.id)).status).toBe("approved");
+  });
+
+  it("approves without a Loom: the placeholder line is removed, never sent (David, 2026-10-20)", async () => {
+    const { createProposal } = await import("@/lib/db");
+    const { approve, attachLoom, insertLoomLine, markApplied } = await import("@/lib/proposals/submit");
+    const draft = "Hi Alan,\n\nYour checkout drops carts; I fixed that for a 3-store brand.\n\nLoom: {{LOOM_URL}}\n\nDELIVERABLES:\n• Fix\n\nBUDGET: $5,000 - two milestones\n\nDavid";
+    const base = {
+      jobId: "j4", jobTitle: "AI agent", jobUrl: "https://www.upwork.com/jobs/~02j4", status: "needs_loom" as const,
+      coverLetter: draft, research: null, answers: [], bid: 5000, estimatedDuration: null, portfolioProjectIds: [], loomUrl: null,
+      approvedAt: null, preview: null, previewId: null, submittedAt: null, originalDraft: draft, model: "m", promptVersion: null,
+    };
+    const p = await createProposal(base);
+    const ok = await approve(p.id);
+    expect(ok.status).toBe("approved");
+    expect(ok.coverLetter).not.toContain("{{LOOM_URL}}");
+    expect(ok.coverLetter).not.toMatch(/^Loom:/m);
+    expect(ok.coverLetter).toContain("DELIVERABLES:");
+    expect(ok.approvedAt).toBeTruthy();
+    // A Loom attached later goes back after the opener and asks for a fresh approval.
+    const later = await attachLoom(p.id, "https://www.loom.com/share/xyz789");
+    expect(later.status).toBe("ready");
+    expect(later.coverLetter.split(/\n\s*\n/)[2]).toBe("Loom: https://www.loom.com/share/xyz789");
+    expect(insertLoomLine("Hi,\n\nOpener", "https://www.loom.com/share/1")).toBe("Hi,\n\nOpener\n\nLoom: https://www.loom.com/share/1");
+    // The copy-and-paste route stores the letter the way it was pasted: without the placeholder line.
+    const q = await createProposal({ ...base, jobId: "j5" });
+    const sent = await markApplied(q.id);
+    expect(sent.coverLetter).not.toContain("{{LOOM_URL}}");
+    expect(sent.status).toBe("submitted");
   });
 
   it("records a proposal David pasted into Upwork himself, but never one that still has a note to him", async () => {
@@ -195,6 +222,18 @@ describe("enrich before judging", () => {
     expect(sent).toEqual([j.id]);
     const stored = await getJob(j.id);
     expect(stored?.score.rules?.flags.find((x) => x.code === "no_record")?.severity).toBe("amber");
+  });
+
+  it("alerts a job in his fields at once when the day's job-open budget is spent, instead of leaving it pending", async () => {
+    await aiOn();
+    const f = await feed();
+    const sent: string[] = [];
+    const [base] = demoJobs(Date.now(), "nob");
+    const j = { ...base, title: "Blockchain AI developer for a crypto tracker (LLM agents)" };
+    const spent = { enrich: async () => { throw Object.assign(new Error("job-open budget used (120/120)"), { kind: "wait" }); }, rank: async () => verdict };
+    const r = await processResults(f, [j], { notifiers: notifiers(sent), hooks: spent });
+    expect(r.pending).toBe(0);
+    expect(sent).toEqual([j.id]);
   });
 
   it("judges a waiting job in his fields on the feed row when no lookups are left, instead of holding it forever", async () => {

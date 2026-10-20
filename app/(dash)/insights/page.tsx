@@ -1,6 +1,8 @@
 import { DataTable, FunnelChart, ShareBars, WinRateChart, type FunnelRow } from "@/components/insights/charts";
 import { GhostPatterns } from "@/components/insights/GhostPatterns";
 import { ManualMetricsForm } from "@/components/insights/ManualMetricsForm";
+import { NightlyReview } from "@/components/insights/NightlyReview";
+import { ProposalKpis } from "@/components/insights/ProposalKpis";
 import { RunButton } from "@/components/insights/RunButton";
 import { PromptLab } from "@/components/insights/PromptLab";
 import { WhatWins } from "@/components/insights/WhatWins";
@@ -49,8 +51,14 @@ export default async function Insights() {
     <>
       <PageHead title="Insights" subtitle="How your proposals convert, whether alerts are any good, and what to change on your profile. Reports refresh monthly on their own; run any of them now with its button." />
 
+      {/* 24-hour proposal KPIs with the nightly history */}
+      <div className="mt-4"><ProposalKpis history /></div>
+
       {/* (0) What wins: which proposals got a reply, and lessons for the AI (approve first) */}
       <WhatWins />
+
+      {/* (0a) Nightly review: ghost jobs / opener missed / opener worked / wins, and what the AI learned */}
+      <NightlyReview />
 
       {/* (0b) Prompt lab: which writer prompt version gets replies, per scenario */}
       <PromptLab />

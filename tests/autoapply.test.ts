@@ -49,6 +49,11 @@ describe("night auto-apply", () => {
     expect(autoApplyBlocker({ ...(await getJob(job.id))!, score: { ...(await getJob(job.id))!.score, total: 95 } }, a)).toBeNull();
     expect(autoApplyBlocker({ ...(await getJob(job.id))!, score: { ...(await getJob(job.id))!.score, total: 95 }, totalApplicants: 15 }, a)).toMatch(/15 proposals/);
     expect(autoApplyBlocker({ ...(await getJob(job.id))!, score: { ...(await getJob(job.id))!.score, total: 95 }, client: { ...job.client, paymentVerified: false } }, a)).toMatch(/payment/);
+    // A client who engaged with nobody on an earlier job David applied to (nightly review) is skipped.
+    const ok = { ...(await getJob(job.id))!, score: { ...(await getJob(job.id))!.score, total: 95 } };
+    const withClient = { ...ok, enrichment: { activity: { invitesSent: 0, interviewed: 0, hired: 0, offered: 0, unansweredInvites: 0 }, ...ok.enrichment, clientId: "c-ghost" } as NonNullable<typeof ok.enrichment> };
+    expect(autoApplyBlocker(withClient, a, Date.now(), new Set(["c-ghost"]))).toMatch(/ignored all proposals/);
+    expect(autoApplyBlocker(withClient, a, Date.now(), new Set(["c-other"]))).toBeNull();
   });
 
   it("lets a job the watch loop vouched for (fit ≥ minFit) past rank and AI fit, but not the other bars", async () => {

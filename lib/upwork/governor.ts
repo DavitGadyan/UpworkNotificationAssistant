@@ -14,7 +14,8 @@ import { today } from "../ratelimit";
  *   one poller  → feed searches only from Settings → "Who searches Upwork" (chat session or worker).
  *   budgets     → per 24 h: total (settings cap, ≤ 2,800), searches ≤ 1,400, job opens ≤ 120; ≤ 200 per hour.
  *   slow-down   → any 429 / too quickly / 5xx doubles the feed cadence per level (L1 ×2 … L3 ×8);
- *                 2 clean hours lower it one step. Running ahead of the day's pace counts as one level.
+ *                 2 clean hours lower it one step; and after Settings → "Back to normal after" (30 min) with no
+ *                 new warning, the governor re-checks and drops straight back to the normal schedule (L0). Running ahead of the day's pace counts as one level.
  *   job opens   → ≥ 8 s apart; the same job at most once per 6 h; never again after a refusal;
  *                 all opens pause 30 min (doubling per level) after a "too quickly".
  *   evening     → high-value US clients post from ~18:00 Armenian time (David, 2026-10-17). Inside the peak
@@ -28,7 +29,7 @@ export const LIMITS = {
   hardDailyCap: 2800,
   hourly: 200,
   searchPerDay: 1400,
-  getPerDay: 120, // David, 2026-10-19: 60 ran out by early morning, so nothing new was ranked, drafted or auto-applied
+  getPerDay: 500, // default for Settings → Upwork → job opens per day (David, 2026-10-20: "by default 500", max 600)
   getGapMs: 8_000,
   sameJobMs: 6 * 36e5,
   getPauseMs: 30 * 60_000,
@@ -59,6 +60,8 @@ interface State {
   lastGetAt: number;
   getPauseUntil: number;
   lastError: { at: number; cls: ErrorClass; detail: string } | null;
+  /** David's manual cool-down: no Upwork calls until `until`; if nothing failed since `from`, the slow-down level resets to 0. */
+  cooldown?: { from: number; until: number } | null;
 }
 const KEY = "upwork_governor";
 const JOBS_KEY = "governor_jobs";
@@ -84,7 +87,16 @@ export function classify(msg: string): ErrorClass {
 async function load(now: number): Promise<State> {
   const s = { ...fresh(), ...(await kvGet<State>(KEY)) };
   // Decay: each full clean 2 h since the last level change lowers the level by one.
+  // David, 2026-10-19: re-check `recoverAfterMin` after the last warning - nothing new since → normal schedule again.
+  const recoverMs = ((await getSettings()).upwork.recoverAfterMin ?? 30) * 60_000;
+  if (s.level > 0 && !s.restricted && now - s.levelAt >= recoverMs) { s.level = 0; s.levelAt = now; }
   while (s.level > 0 && now - s.levelAt >= LIMITS.decayMs) { s.level--; s.levelAt += LIMITS.decayMs; }
+  // A finished cool-down with no warning or restriction since it started → back to the normal schedule.
+  if (s.cooldown && now >= s.cooldown.until) {
+    const clean = !s.restricted && !(s.lastError && s.lastError.at >= s.cooldown.from && s.lastError.cls !== "other" && s.lastError.cls !== "auth");
+    if (clean) { s.level = 0; s.levelAt = now; }
+    s.cooldown = null;
+  }
   return s;
 }
 const save = (s: State) => kvSet(KEY, s);
@@ -165,6 +177,14 @@ async function aheadOfPace(cap: number, nowMs: number, ps: Awaited<ReturnType<ty
 }
 
 export const dailyCap = async () => Math.min(LIMITS.hardDailyCap, (await getSettings()).guard.dailyCallCap);
+/** Job opens per day from Settings (60–600; David raised the max to 600 on 2026-10-20), default LIMITS.getPerDay. */
+export const getsPerDay = async () => Math.min(600, Math.max(60, (await getSettings()).upwork.jobOpensPerDay ?? LIMITS.getPerDay));
+/**
+ * Start of the budget day: 00:00 UTC = 04:00 Asia/Yerevan, the same boundary as the AI $ budget (lib/usage.ts).
+ * David, 2026-10-20: the call / search / job-open counters reset there instead of sliding over the last 24 h
+ * ("327/300 why it did not update to 0 at 4 am"). The hourly cap and the pacing intervals still bound the rate.
+ */
+export const budgetDayStart = (nowMs: number) => { const d = new Date(nowMs); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()); };
 export const cadenceMs = (level: number, baseMs = LIMITS.baseCadenceMs) => baseMs * 2 ** Math.min(level, LIMITS.maxLevel);
 
 export async function decide(label: string, meta: CallMeta = {}, who: Caller = caller, nowMs = Date.now()): Promise<Decision> {
@@ -172,13 +192,16 @@ export async function decide(label: string, meta: CallMeta = {}, who: Caller = c
   if (st.restricted) {
     return { go: false, scope: "stop", reason: `Upwork restricted access at ${new Date(st.restricted.at).toISOString()} - run "npm run governor -- resume" only after Upwork support restores it`, retryAt: Infinity };
   }
+  if (st.cooldown && nowMs < st.cooldown.until) {
+    return { go: false, scope: "wait", reason: `cool-down until ${new Date(st.cooldown.until).toISOString()}`, retryAt: st.cooldown.until };
+  }
   const settings = await getSettings();
   if (meta.feed && (who === "worker" || who === "chat") && settings.upwork.poller !== who) {
     return { go: false, scope: "stop", reason: `not-active-poller: Settings → Who searches Upwork is "${settings.upwork.poller}"`, retryAt: Infinity };
   }
   const cap = await dailyCap();
-  const day = await mcpCallCounts(nowMs - 864e5);
-  if (day.total >= cap) return { go: false, scope: "wait", reason: `24 h budget used (${day.total}/${cap})`, retryAt: nowMs + 30 * 60_000 };
+  const day = await mcpCallCounts(budgetDayStart(nowMs));
+  if (day.total >= cap) return { go: false, scope: "wait", reason: `day budget used (${day.total}/${cap}, resets 04:00 Asia/Yerevan)`, retryAt: nowMs + 30 * 60_000 };
   if ((await mcpCallCounts(nowMs - 36e5)).total >= LIMITS.hourly) return { go: false, scope: "wait", reason: `hourly budget used (${LIMITS.hourly})`, retryAt: nowMs + 10 * 60_000 };
   if (isSearch(label) && day.search >= LIMITS.searchPerDay) return { go: false, scope: "wait", reason: `search budget used (${day.search}/${LIMITS.searchPerDay})`, retryAt: nowMs + 30 * 60_000 };
 
@@ -189,7 +212,8 @@ export async function decide(label: string, meta: CallMeta = {}, who: Caller = c
       if (m && nowMs - m.at < LIMITS.sameJobMs) return { go: false, scope: "job", reason: `job ${meta.jobId} opened < 6 h ago - not reopened`, retryAt: m.at + LIMITS.sameJobMs };
     }
     if (nowMs < st.getPauseUntil) return { go: false, scope: "wait", reason: `job opens paused after "too quickly" until ${new Date(st.getPauseUntil).toISOString()}`, retryAt: st.getPauseUntil };
-    if (day.get >= LIMITS.getPerDay) return { go: false, scope: "wait", reason: `job-open budget used (${day.get}/${LIMITS.getPerDay})`, retryAt: nowMs + 60 * 60_000 };
+    const getCap = await getsPerDay();
+    if (day.get >= getCap) return { go: false, scope: "wait", reason: `job-open budget used (${day.get}/${getCap}, resets 04:00 Asia/Yerevan)`, retryAt: nowMs + 60 * 60_000 };
     if (nowMs - st.lastGetAt < LIMITS.getGapMs) return { go: false, scope: "wait", reason: "job opens are spaced 8 s apart", retryAt: st.lastGetAt + LIMITS.getGapMs };
   }
 
@@ -281,6 +305,17 @@ export async function resume(nowMs = Date.now()) {
   await save(st);
 }
 
+/**
+ * Human-only (David, 2026-10-19): pause every Upwork call for `minutes`. If nothing is throttled or restricted
+ * in the meantime, the slow-down level resets to 0 when it ends - the normal 4 min peak / 7 min off-peak schedule.
+ */
+export async function coolDown(minutes: number, nowMs = Date.now()) {
+  const st = await load(nowMs);
+  st.cooldown = { from: nowMs, until: nowMs + minutes * 60_000 };
+  await save(st);
+  return st.cooldown.until;
+}
+
 /** Mark a restriction seen elsewhere (no Telegram) - used to carry over the 2026-10-17 event. */
 export async function markRestricted(detail: string, nowMs = Date.now()) {
   const st = await load(nowMs);
@@ -293,7 +328,7 @@ export const isRestricted = async () => !!(await load(Date.now())).restricted;
 export async function governorStatus(nowMs = Date.now()) {
   const st = await load(nowMs);
   const cap = await dailyCap();
-  const [day, hour] = await Promise.all([mcpCallCounts(nowMs - 864e5), mcpCallCounts(nowMs - 36e5)]);
+  const [day, hour] = await Promise.all([mcpCallCounts(budgetDayStart(nowMs)), mcpCallCounts(nowMs - 36e5)]);
   const ps = await peakState(nowMs);
   const ahead = await aheadOfPace(cap, nowMs, ps);
   const level = Math.min(LIMITS.maxLevel, st.level + (ahead ? 1 : 0));
@@ -316,9 +351,10 @@ export async function governorStatus(nowMs = Date.now()) {
       day: { used: day.total, cap },
       hour: { used: hour.total, cap: LIMITS.hourly },
       search: { used: day.search, cap: LIMITS.searchPerDay },
-      get: { used: day.get, cap: LIMITS.getPerDay },
+      get: { used: day.get, cap: await getsPerDay() },
     },
     getPauseUntil: st.getPauseUntil > nowMs ? new Date(st.getPauseUntil).toISOString() : null,
+    cooldownUntil: st.cooldown && st.cooldown.until > nowMs ? new Date(st.cooldown.until).toISOString() : null,
     lastCall: Object.fromEntries(Object.entries(st.lastCall).map(([k, v]) => [k, new Date(v).toISOString()])),
     lastError: st.lastError ? { ...st.lastError, at: new Date(st.lastError.at).toISOString() } : null,
     errors24h: await errorSummary(nowMs),

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState } from "react-native";
 import * as demo from "../demo";
 import type { PromptStatRow,
   LessonsDecision, ProposalOutcomeRow, CachedJob, FeedRow, JobRow, NotificationDbRow, Proposal, ProposalRow, ReportKind, ReportRow, Settings, SnapshotRow, WatchRow,
@@ -178,9 +179,14 @@ export async function registerDevice(token: string, platform: string) {
 // ---------- hook ----------
 type Table = "jobs" | "proposals" | "notifications" | "job_watch";
 
+/** Fallback poll for Supabase-backed lists (David, 2026-10-20: jobs were not refreshing on the phone). */
+const POLL_MS = 120_000;
+
 /**
  * Fetch + refresh + live updates. `tables` lists the realtime-enabled tables whose changes should trigger
- * a refetch (debounced, so a burst of worker writes costs one query).
+ * a refetch (debounced, so a burst of worker writes costs one query). Realtime is best effort - the socket
+ * drops while the app is in the background and a missed event is never replayed - so every table-backed
+ * query is also re-read every 2 minutes while the app is open and as soon as it comes back to the foreground.
  */
 export function useQuery<T>(key: string, fetcher: () => Promise<T>, tables: Table[] = []) {
   const [data, setData] = useState<T | undefined>(undefined);
@@ -220,7 +226,19 @@ export function useQuery<T>(key: string, fetcher: () => Promise<T>, tables: Tabl
       });
     }
     ch.subscribe();
-    return () => { if (t) clearTimeout(t); supabase.removeChannel(ch); };
+    // Fallback: poll while the app is in the foreground, and re-read the moment it comes back.
+    let lastAt = Date.now();
+    const poll = setInterval(() => {
+      if (AppState.currentState !== "active") return;
+      lastAt = Date.now();
+      void load("silent");
+    }, POLL_MS);
+    const app = AppState.addEventListener("change", (state) => {
+      if (state !== "active" || Date.now() - lastAt < 5_000) return;
+      lastAt = Date.now();
+      void load("silent");
+    });
+    return () => { if (t) clearTimeout(t); clearInterval(poll); app.remove(); supabase.removeChannel(ch); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, load]);
 

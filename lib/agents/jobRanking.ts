@@ -7,6 +7,8 @@ import { profileDigest, relevantProjects } from "./profile";
 import { repeatPoster, repeatPosterNote } from "../ranking/repeatPoster";
 import { knownHireRate, knownHires } from "../ranking/rules";
 import { getPrompt } from "./prompts";
+import { reviewDigest } from "../learning/review";
+import { segmentOf } from "../learning/segments";
 
 /* JobRankingAssistant, stage B: the LLM judgement on fit and client value. */
 
@@ -66,11 +68,18 @@ async function calibrationExamples(): Promise<string> {
       .join("\n"));
   }
   if (out.length) {
-    const label = { win: "client replied", loss_viewed: "client viewed, never replied", loss_unviewed: "client never opened it" } as Record<string, string>;
+    // A ghost job is the ranker's miss; a skipped opener is the writer's, so it doesn't count against the job choice.
+    const label: Record<string, [string, string]> = {
+      hired: ["+1", "offer / hired"], replied: ["+1", "client replied"], opener_worked: ["+1", "client opened it (real, engaged client)"],
+      opener_missed: ["0", "client hired/interviewed others and never opened David's - a real job, lost on the opener or timing"],
+      ghost: ["-1", "client engaged with nobody (no invites, interviews or hires) - not really hiring"],
+    };
     parts.push("\nJobs David applied to and what the client did (the real outcome - weigh this above taste):\n" + out
-      .map((o) => `${o.outcome === "win" ? "+1" : "-1"} "${o.jobTitle.slice(0, 90)}" (${[o.job?.field, o.job?.clientCountry, o.insights?.proposalsTotal != null ? `${o.insights.proposalsTotal} applicants` : null].filter(Boolean).join(", ")}) - ${label[o.outcome]}`)
+      .map((o) => { const [sign, what] = label[segmentOf(o)] ?? ["0", o.outcome]; return `${sign} "${o.jobTitle.slice(0, 90)}" (${[o.job?.field, o.job?.clientCountry, o.insights?.proposalsTotal != null ? `${o.insights.proposalsTotal} applicants` : null].filter(Boolean).join(", ")}) - ${what}`; })
       .join("\n"));
   }
+  const ghosts = await reviewDigest("ranker").catch(() => "");
+  if (ghosts) parts.push(ghosts);
   return parts.join("\n");
 }
 

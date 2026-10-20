@@ -80,7 +80,7 @@ export default function Overview() {
       </View>
       <View style={{ flexDirection: "row", gap: 12, marginBottom: 20 }}>
         <Stat label="Watching" value={watching} sub={watching === 1 ? "job's competition" : "jobs' competition"} icon={<IconEye size={16} color={c.muted} />} onPress={() => router.push("/watchlist")} />
-        <Stat label="Waiting for Loom" value={needLoom} sub={`${toApprove} more to approve`} tone={needLoom ? "warn" : undefined} icon={<IconDoc size={16} color={c.muted} cut={c.surface} />} onPress={() => router.navigate("/proposals")} />
+        <Stat label="Drafts to review" value={needLoom} sub={`${toApprove} more to approve`} tone={needLoom ? "warn" : undefined} icon={<IconDoc size={16} color={c.muted} cut={c.surface} />} onPress={() => router.navigate("/proposals")} />
       </View>
 
       <SectionTitle right={h ? <Pill label={h.ok ? "All on time" : h.workerStale ? "Worker stalled" : `${h.lateFeeds} late`} tone={h.ok ? "good" : "bad"} /> : <Pill label="Worker offline" tone="neutral" />}>Polling health</SectionTitle>

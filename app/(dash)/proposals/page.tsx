@@ -14,7 +14,7 @@ export const metadata = { title: "Proposals" };
 
 const FILTERS: { value: string; label: string; match: ProposalStatus[] }[] = [
   { value: "", label: "Open", match: ["draft", "needs_loom", "ready", "approved", "previewed"] },
-  { value: "needs_loom", label: "Needs Loom", match: ["needs_loom", "draft"] },
+  { value: "needs_loom", label: "To review", match: ["needs_loom", "draft"] },
   { value: "ready", label: "To approve", match: ["ready"] },
   { value: "approved", label: "To preview", match: ["approved", "previewed"] },
   { value: "submitted", label: "Submitted", match: ["submitted"] },
@@ -40,7 +40,7 @@ export default async function Proposals({ searchParams }: { searchParams: Promis
 
   return (
     <>
-      <PageHead title="Proposals" subtitle="Drafts written for you, waiting for a Loom, your approval and a final check. Nothing is sent to Upwork until you submit it yourself." />
+      <PageHead title="Proposals" subtitle="Drafts written for you, waiting for your approval and a final check (a Loom video is optional but usually preferred). Nothing is sent to Upwork until you submit it yourself." />
 
       <SearchBox placeholder="Search proposals: job, draft text or client" className="mb-4" />
       <nav aria-label="Filter by status" className="seg mb-6 w-full md:w-auto">

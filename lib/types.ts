@@ -153,6 +153,10 @@ export interface Settings {
      * high-value jobs actually showed up (after 7 days of data). Times are HH:MM in `timezone`.
      */
     peak: { enabled: boolean; timezone: string; start: string; end: string; peakEveryMin: number; offPeakEveryMin: number; reservePct: number; learn: boolean };
+    /** After a warning (429, "too quickly", 5xx) the feeds slow down; this many minutes with no new warning → back to normal. */
+    recoverAfterMin: number;
+    /** Job opens (find_jobs get) allowed per day (resets 04:00 Asia/Yerevan); 60–600, default 500. Clean days have peaked near 380, throttles began near 750. */
+    jobOpensPerDay: number;
   };
   watch: { enabled: boolean; intervalMin: number; maxHours: number };
   /** provider: api = Claude API key; claude-cli = local Claude Code login (`claude -p`, subscription). */
@@ -338,6 +342,18 @@ export interface Proposal {
 /** void = no signal about David (he withdrew, or the client deleted the job as accidental/inappropriate). */
 export type OutcomeLabel = "win" | "loss_viewed" | "loss_unviewed" | "pending" | "void";
 
+/**
+ * The nightly review's finer split of a decided proposal (David, 2026-10-20):
+ *   ghost          never viewed, and the client showed no activity on the job at all (no invites, interviews,
+ *                  offers or hires) - most likely not a real hiring job; teaches the ranker which jobs to skip
+ *   opener_missed  never viewed, but the client was active (interviewed, offered or hired someone) - his first
+ *                  lines lost to other proposals
+ *   opener_worked  viewed, no reply - the opener earned the click; the rest of the letter didn't convince
+ *   replied        the client wrote back / interviewed, no contract yet
+ *   hired          offer or contract - the whole conversation is studied to repeat it
+ */
+export type OutcomeSegment = "ghost" | "opener_missed" | "opener_worked" | "replied" | "hired" | "pending" | "void";
+
 export interface OutcomeJob {
   category: string | null;
   subcategory: string | null;
@@ -351,6 +367,14 @@ export interface OutcomeJob {
   clientHires: number | null;
   interviewed: number | null;
   hired: number | null;
+  /** Offers the client has sent on this job (to anyone). With hired, a sign the client already chose someone. */
+  offered?: number | null;
+  /** Invites the client sent on this job (to anyone). */
+  invites?: number | null;
+  /** Upwork client id, when the job was still cached - lets auto-apply skip clients who ghosted David before. */
+  clientId?: string | null;
+  /** When the job's activity (interviewed / offered / hired) was last read from Upwork. */
+  activityAt?: number;
   /** Our ranking when the job was still cached. */
   rank: number | null;
   rulesScore: number | null;

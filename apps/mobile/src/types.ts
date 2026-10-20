@@ -143,6 +143,10 @@ export interface Settings {
   upwork?: {
     poller: "chat" | "worker";
     peak?: { enabled: boolean; timezone: string; start: string; end: string; peakEveryMin: number; offPeakEveryMin: number; reservePct: number; learn: boolean };
+    /** Minutes with no new Upwork warning before the feeds go back to the normal schedule. */
+    recoverAfterMin?: number;
+    /** Job opens allowed per day, resets 04:00 Asia/Yerevan (60–600, default 500). */
+    jobOpensPerDay?: number;
   };
   watch: { enabled: boolean; intervalMin: number; maxHours: number };
   /** provider: api = Claude API key; claude-cli = local Claude Code login (`claude -p`, subscription). */

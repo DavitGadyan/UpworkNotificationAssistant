@@ -7,7 +7,7 @@ import { fetchProposals, useQuery } from "../../lib/data";
 import { money, timeAgo } from "../../lib/format";
 import { haptic } from "../../lib/haptics";
 import { useSettings } from "../../lib/settings";
-import { PROPOSAL_STATUS, STEPS, stepIndex } from "../../lib/status";
+import { LAST_STEP, PROPOSAL_STATUS, STEPS, stepIndex } from "../../lib/status";
 import { useTheme } from "../../theme";
 import type { ProposalStatus } from "../../types";
 
@@ -52,7 +52,7 @@ export default function Proposals() {
                 </Row>
                 {idx >= 0 ? (
                   <Row gap={4} style={{ marginTop: 2 }} >
-                    {STEPS.map((s, i) => <View key={s} accessibilityLabel={s} style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: i <= idx ? (idx === 4 ? c.good : c.ink) : c.control }} />)}
+                    {STEPS.map((s, i) => <View key={s} accessibilityLabel={s} style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: i <= idx ? (idx === LAST_STEP ? c.good : c.ink) : c.control }} />)}
                   </Row>
                 ) : null}
               </Card>

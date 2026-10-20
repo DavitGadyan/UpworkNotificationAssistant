@@ -9,6 +9,7 @@ import { UpworkStatus } from "@/components/UpworkStatus";
 import { Sparkline } from "@/components/ui/Sparkline";
 import { StatGrid } from "@/components/ui/StatGrid";
 import { LlmSpend } from "@/components/LlmSpend";
+import { ProposalKpis } from "@/components/insights/ProposalKpis";
 import { config } from "@/lib/config";
 import { dailyRequests, getSettings, getTokens, getWorkerHeartbeat, latestReport, listJobs, listProposals, listSearches, listWatches } from "@/lib/db";
 import { healthReport } from "@/lib/health";
@@ -77,6 +78,7 @@ export default async function Overview({ searchParams }: { searchParams: SP }) {
       {/* Worker feed health only matters when the worker is the searcher; the Upwork card covers the chat searcher. */}
       {health && health.pacing.poller === "worker" && <PollingHealth h={health} />}
 
+      <ProposalKpis />
       <UpworkStatus />
       <UsageCard />
 
@@ -87,7 +89,7 @@ export default async function Overview({ searchParams }: { searchParams: SP }) {
           tone={mcp.breakerOpen ? "bad" : mcp.connected ? "good" : "warn"} />
         <Tile href="/watchlist" icon={<IconEye size={18} />} label="Watching" value={<span className="num">{watching}</span>} sub={watching === 1 ? "job's competition" : "jobs' competition"} />
         <Tile href="/proposals" icon={<IconDoc size={18} />} label="Drafts" value={<span className="num">{needLoom + toApprove}</span>}
-          sub={needLoom + toApprove ? `${needLoom} need Loom · ${toApprove} to approve/send` : "Nothing waiting"} tone={needLoom + toApprove ? "info" : undefined} />
+          sub={needLoom + toApprove ? `${needLoom} to review · ${toApprove} to approve/send` : "Nothing waiting"} tone={needLoom + toApprove ? "info" : undefined} />
         <Tile href="/insights" icon={<IconChart size={18} />} label="Monthly review"
           value={null} sub={review ? <><span className="line-clamp-3 text-[var(--color-ink)]">{review.data.headline}</span><span className="mt-1 block">{review.data.period}</span></> : "No review yet"} />
       </div>

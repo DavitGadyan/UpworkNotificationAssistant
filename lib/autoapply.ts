@@ -1,4 +1,5 @@
-import { getJob, getSettings, kvGet, kvSet, listProposals } from "./db";
+import { getJob, getSettings, kvGet, kvSet, listProposalOutcomesSafe, listProposals } from "./db";
+import { ghostClientIds } from "./learning/segments";
 import { jobUrl } from "./format";
 import { sendText } from "./notify/telegram";
 import { approveAuto, GateError, preview, submit } from "./proposals/submit";
@@ -12,7 +13,8 @@ import { connectsBalance } from "./usage";
  * (default 00:00-11:00 Asia/Yerevan) the worker submits auto-drafted proposals - without a Loom video - for jobs
  * that clear every bar:
  *   rank ≥ minRank, AI fit ≥ minFit, fewer than maxProposals proposals, verified payment, not excluded,
- *   not a likely ghost post, still open in our data, seen in the last 24 h;
+ *   not a likely ghost post, not a client who ghosted David before (nightly review), still open in our data,
+ *   seen in the last 24 h;
  * and only within maxPerNight submissions and maxConnectsPerNight Connects, never taking the balance below
  * minConnectsBalance. A preview without a readable Connects cost is NOT submitted - it waits for David.
  * Every Upwork call goes through the pacing governor; nothing runs while it is stopped ("restricted").
@@ -46,7 +48,7 @@ export function nightWindow(a: Pick<AA, "timezone" | "start" | "end">, nowMs = D
 export const vouched = (j: Pick<CachedJob, "score">, minFit: number) => (j.score.watch?.fit ?? 0) >= minFit;
 
 /** Does this job clear every auto-apply bar? Returns the first reason it doesn't, or null. */
-export function autoApplyBlocker(j: CachedJob, a: AA, nowMs = Date.now()): string | null {
+export function autoApplyBlocker(j: CachedJob, a: AA, nowMs = Date.now(), ghostClients: Set<string> = new Set()): string | null {
   if (j.score.excluded) return "excluded";
   if (["dismissed", "applied"].includes(j.status)) return `status ${j.status}`;
   const v = vouched(j, a.minFit);
@@ -55,6 +57,7 @@ export function autoApplyBlocker(j: CachedJob, a: AA, nowMs = Date.now()): strin
   if (proposalsLow(j) >= a.maxProposals) return `${j.proposalsTier ?? j.totalApplicants} proposals`;
   if (a.requireVerifiedPayment && j.client.paymentVerified !== true) return "payment not verified";
   if (j.score.intent?.ghostRisk === "high") return "likely not hiring";
+  if (j.enrichment?.clientId && ghostClients.has(j.enrichment.clientId)) return "client ignored all proposals on an earlier job of David's";
   if (j.enrichment?.status && j.enrichment.status !== "ACTIVE") return "job closed";
   if ((j.enrichment?.activity.hired ?? 0) > 0) return "client already hired";
   if (nowMs - new Date(j.fetchedAt).getTime() > 864e5) return "older than 24 h";
@@ -98,9 +101,10 @@ export async function runAutoApply(opts: { nowMs?: number; notify?: boolean } = 
   // Auto-drafts waiting for a Loom, best job first; a proposal already auto-approved/previewed goes on from there.
   const props = (await listProposals()).filter((p) => ["needs_loom", "ready"].includes(p.status) || (p.preview?.auto === true && ["approved", "previewed"].includes(p.status)));
   const ranked: { p: Proposal; j: CachedJob }[] = [];
+  const ghosts = ghostClientIds(await listProposalOutcomesSafe({ limit: 1000 }));
   for (const p of props) {
     const j = await getJob(p.jobId);
-    if (j && !n.ids.includes(j.id) && !autoApplyBlocker(j, a, nowMs)) ranked.push({ p, j });
+    if (j && !n.ids.includes(j.id) && !autoApplyBlocker(j, a, nowMs, ghosts)) ranked.push({ p, j });
   }
   ranked.sort((x, y) => y.j.score.total - x.j.score.total);
   const pick = ranked[0];

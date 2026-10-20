@@ -11,9 +11,12 @@ import { jobBrief } from "./jobRanking";
 import { structured, untrusted } from "./llm";
 import { culturalProfile } from "./closer";
 import { profileDigest, relevantProjects } from "./profile";
+import { workHistoryDigest } from "./workHistory";
 import { getPrompt } from "./prompts";
 import { pickProposalPrompt, promptBody } from "../learning/promptLab";
 import { editExamples } from "../learning/edits";
+import { reviewDigest } from "../learning/review";
+import { reward, segmentOf } from "../learning/segments";
 import { findPlaceholders, normalizeHeadings, placeholderHits, removePlaceholders } from "../proposals/clean";
 
 /*
@@ -183,6 +186,38 @@ export async function styleExamples(field: string | null = null): Promise<string
     done.map((p, i) => `--- example ${i + 1}: ${p.jobTitle}\n${p.coverLetter.slice(0, 1500)}`).join("\n");
 }
 
+/** The opener of a sent letter: the first 1-2 sentences after the greeting line (what the client sees in the list). */
+export function openerText(letter: string | null | undefined): string {
+  const lines = (letter ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
+  const body = /^(hi|hello|hey|dear|γεια|bonjour|hola|hallo)\b/i.test(lines[0] ?? "") || (lines[0] ?? "").length < 30 ? lines.slice(1) : lines;
+  const text = body.join(" ");
+  const m = text.match(/^(.{40,260}?[.!?])(\s|$)(.{0,200}?[.!?])?/);
+  return (m ? `${m[1]}${m[3] ? ` ${m[3]}` : ""}` : text.slice(0, 260)).trim();
+}
+
+/**
+ * Openers that earned a click vs openers that were skipped (David, 2026-10-19). Clients see the first line or two
+ * in their proposal list: a viewed proposal means the opener worked for that kind of job; a never-viewed one
+ * (decided after 7 days, or when the client offered / hired someone else) means it did not. Closest field first.
+ */
+export async function openerExamples(field: string | null = null): Promise<string> {
+  const rows = (await listProposalOutcomesSafe({ limit: 300 })).filter((o) => (o.coverLetter ?? "").length > 80);
+  const near = (a: typeof rows[number], b: typeof rows[number]) => Number((b.job?.field ?? null) === field && !!field) - Number((a.job?.field ?? null) === field && !!field);
+  // Best reward first (hired > replied > viewed), then same field, then newest - so a fresh view shows up at once.
+  const opened = rows.filter((o) => reward(o) > 0)
+    .sort((a, b) => reward(b) - reward(a) || near(a, b) || Date.parse(b.submittedAt) - Date.parse(a.submittedAt)).slice(0, 5);
+  // Only proposals the client skipped while hiring someone: a ghost job (client opened nobody's) says nothing about the opener.
+  const skipped = rows.filter((o) => segmentOf(o) === "opener_missed").sort(near).slice(0, 4);
+  if (!opened.length && !skipped.length) return "";
+  const result = (o: typeof rows[number]) => ({ 3: ", led to an offer/hire", 2: ", client replied", 1: ", client viewed it" } as Record<number, string>)[reward(o)] ?? "";
+  const show = (xs: typeof rows) => xs.map((o) => `- "${openerText(o.coverLetter)}" (${o.jobTitle}${o.job?.field ? `, ${o.job.field}` : ""}${result(o)})`).join("\n");
+  return [
+    "\n\n## Openers - what got clients to open David's proposals (learn the pattern, never reuse the words or facts)",
+    opened.length ? `Openers clients OPENED:\n${show(opened)}` : "",
+    skipped.length ? `Openers clients NEVER opened (their proposal list showed this and they skipped it) - do not write openers like these:\n${show(skipped)}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 export async function draftProposal(jobId: string, opts: { webSearch?: boolean; guidance?: string; agent?: string } = {}): Promise<Proposal> {
   const job = await getJob(jobId);
   if (!job) throw new Error("Job not found (it may have expired from the cache)");
@@ -224,6 +259,8 @@ export async function draftProposal(jobId: string, opts: { webSearch?: boolean; 
     "## David's profile and portfolio (the only facts you may claim)",
     await profileDigest({ projects: true }),
     await styleExamples(field),
+    await openerExamples(field).catch(() => ""),
+    await reviewDigest("writer").catch(() => ""),
     await editExamples(field).catch(() => ""),
   ].join("\n\n");
   const user = [
@@ -231,6 +268,7 @@ export async function draftProposal(jobId: string, opts: { webSearch?: boolean; 
     "",
     job.score.llm ? `Ranking notes: ${job.score.llm.summary} Big fish guess: ${job.score.llm.bigFish ?? "-"}` : "",
     rel.length ? `Most relevant portfolio projects: ${rel.map((p) => `${p.id} "${p.title}" - ${p.summary} Outcomes: ${p.outcomes.slice(0, 2).join("; ")}`).join(" | ")}` : "",
+    await workHistoryDigest(`${job.title} ${job.skills.join(" ")} ${(enrichment?.description || job.description).slice(0, 2000)}`).catch(() => ""),
     h?.portfolio_projects.length ? `Upwork portfolio items attachable to the proposal (use these ids in portfolioProjectIds): ${h.portfolio_projects.map((p) => `${p.id}="${p.title}"`).join(", ")}` : "No attachable Upwork portfolio items available - return an empty portfolioProjectIds.",
     enrichment?.screeningQuestions.length ? `Screening questions to answer: ${enrichment.screeningQuestions.map((q, i) => `${i + 1}. ${q}`).join(" ")}` : "No screening questions.",
     enrichment?.bidStats ? `Other bids so far (unit unspecified): avg ${enrichment.bidStats.avg}, min ${enrichment.bidStats.min}, max ${enrichment.bidStats.max}` : "",

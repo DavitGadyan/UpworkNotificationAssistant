@@ -107,6 +107,8 @@ export function cleanSettings(b: Record<string, unknown>, cur: Settings): Settin
           learn: bool(pk.learn, c.learn),
         };
       })(),
+      recoverAfterMin: n(up.recoverAfterMin, 10, 240, cur.upwork.recoverAfterMin ?? 30),
+      jobOpensPerDay: n(up.jobOpensPerDay, 60, 600, cur.upwork.jobOpensPerDay ?? 500),
     },
     watch: {
       enabled: bool(wa.enabled, cur.watch.enabled),

@@ -128,9 +128,15 @@ async function judge(job: Job, search: SavedSearch, ctx: Ctx, summary: Summary, 
         // A refused lookup can stay refused for hours. A job in his fields must not wait on it (David,
         // 2026-10-15: a fresh $57k-spend client went unalerted): judge it on the feed row now, and the alert
         // says the client record is missing. Other errors (502, timeouts) are transient: retry next cycle.
-        if (refused && score.profileFit?.verdict === "core") {
+        // The governor's daily job-open budget is spent (David, 2026-10-19: a $50-90/hr AI job in his fields sat
+        // "pending" for hours and was never alerted). No call was made; jobs in his fields are judged on the row.
+        const noOpens = /job-open budget used|job opens paused/i.test(msg);
+        if (noOpens) ctx.budget.enrich = 0;
+        if ((refused || noOpens) && score.profileFit?.verdict === "core") {
           pending = false;
-          console.warn("client record refused - judging on the feed row", job.id);
+          console.warn("client record unavailable - judging on the feed row", job.id);
+        } else if (noOpens) {
+          pending = true; // not the job's fault: don't use up its retry attempts
         } else {
           pending = await bumpAttempts(job.id) < MAX_DETAIL_ATTEMPTS;
           if (!pending) console.warn("giving up on client record for", job.id);

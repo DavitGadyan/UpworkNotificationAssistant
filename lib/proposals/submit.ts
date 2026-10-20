@@ -6,16 +6,18 @@ import { describeHits, normalizeHeadings, placeholderHits } from "./clean";
 
 /*
  * The submit gate. Nothing reaches Upwork unless every step below happened, in order, by a person:
- *   1. attachLoom  - a real Loom share link replaces the {{LOOM_URL}} placeholder   → status "ready"
- *   2. approve     - David approves the final text                                  → status "approved"
- *   3. preview     - manage_proposals create (or accept_invitation) builds Upwork's preview
+ *   1. approve     - David approves the final text                                  → status "approved"
+ *   2. preview     - manage_proposals create (or accept_invitation) builds Upwork's preview
  *                    (Connects cost, balance, boost, unmet qualifications)         → status "previewed"
- *   4. submit      - confirm_preview with the stored preview_id (second tap)       → status "submitted"
+ *   3. submit      - confirm_preview with the stored preview_id (second tap)       → status "submitted"
+ * A Loom video is optional but preferred (David, 2026-10-20): attachLoom() puts a real Loom share link in place of
+ * the {{LOOM_URL}} placeholder (status "ready"); approving without one simply removes the Loom line, so the
+ * placeholder never reaches a client. "needs_loom" is kept as the status name of a fresh draft for compatibility.
  * Editing the text after approval drops back to "ready". approve, approveAuto and preview refuse a letter or answer
  * that still has a note to David or a fill-in slot ("[DAVID: add link]") - lib/proposals/clean.ts.
- * The one exception is night auto-apply (lib/autoapply.ts, off by default, David 2026-10-18): approveAuto() stands
- * in for steps 1-2 - the Loom line is removed and the proposal is marked preview.auto - and the worker then runs
- * preview and submit itself, inside the Settings → Auto-apply limits. Proposals approved by hand still need Loom.
+ * Night auto-apply (lib/autoapply.ts, off by default, David 2026-10-18): approveAuto() approves an auto-draft the
+ * same way (Loom line removed, proposal marked preview.auto) and the worker then runs preview and submit itself,
+ * inside the Settings → Auto-apply limits.
  */
 
 export class GateError extends Error {}
@@ -45,7 +47,7 @@ export async function editDraft(id: number, patch: Partial<Pick<Proposal, "cover
   if (patch.coverLetter != null) patch = { ...patch, coverLetter: normalizeHeadings(patch.coverLetter) };
   // The editor autosaves as David types: a save that changes nothing must not undo an approval or a preview.
   if ((Object.keys(patch) as (keyof typeof patch)[]).every((k) => JSON.stringify(patch[k] ?? null) === JSON.stringify(p[k] ?? null))) return p;
-  const status = p.status === "approved" || p.status === "previewed" ? (p.loomUrl ? "ready" : "needs_loom") : p.status;
+  const status = p.status === "approved" || p.status === "previewed" ? "ready" : p.status;
   return (await updateProposal(id, { ...patch, status, approvedAt: status === "ready" ? null : p.approvedAt, previewId: null, preview: { ...(p.preview ?? {}), upwork: undefined } }))!;
 }
 
@@ -56,26 +58,38 @@ export async function attachLoom(id: number, url: string): Promise<Proposal> {
   const loom = url.trim();
   const cover = p.coverLetter.includes(LOOM_PLACEHOLDER)
     ? p.coverLetter.replaceAll(LOOM_PLACEHOLDER, loom)
-    : p.loomUrl ? p.coverLetter.replaceAll(p.loomUrl, loom) : `${p.coverLetter}\n\nLOOM VIDEO: ${loom}`;
+    : p.loomUrl ? p.coverLetter.replaceAll(p.loomUrl, loom) : insertLoomLine(p.coverLetter, loom);
   return (await updateProposal(id, { loomUrl: loom, coverLetter: cover, status: "ready", approvedAt: null, previewId: null }))!;
 }
 
+/** Put a "Loom: <link>" block back after the opener (greeting, opener, Loom) when the line was removed earlier. */
+export function insertLoomLine(cover: string, loom: string): string {
+  const blocks = cover.split(/\n\s*\n/);
+  if (blocks.length >= 3) return [...blocks.slice(0, 2), `Loom: ${loom}`, ...blocks.slice(2)].join("\n\n");
+  return `${cover.trim()}\n\nLoom: ${loom}`;
+}
+
+const canApprove = (p: Proposal) => p.status === "ready" || p.status === "needs_loom";
+
 export async function approve(id: number): Promise<Proposal> {
   const p = await must(id);
-  if (!p.loomUrl || !(await isLoomLink(p.loomUrl))) throw new GateError("Attach the Loom video first (the link must open a Loom video)");
-  if (p.coverLetter.includes(LOOM_PLACEHOLDER)) throw new GateError("The cover letter still has the Loom placeholder");
-  assertClientReady(p);
-  if (p.status !== "ready") throw new GateError(`Can't approve a proposal in status "${p.status}"`);
+  if (!canApprove(p)) throw new GateError(`Can't approve a proposal in status "${p.status}"`);
+  if (p.loomUrl && !(await isLoomLink(p.loomUrl))) throw new GateError("The attached Loom link no longer opens a Loom video - replace or remove it");
+  // No Loom: the "Loom: {{LOOM_URL}}" line goes, so the client never sees the placeholder.
+  const cover = p.loomUrl ? p.coverLetter : stripLoomLine(p.coverLetter);
+  if (cover.includes(LOOM_PLACEHOLDER)) throw new GateError("The cover letter still has the Loom placeholder");
+  assertClientReady({ coverLetter: cover, answers: p.answers });
   // Record how much David changed the draft - a strong preference signal for the writer prompt.
-  const changed = similarity(p.originalDraft.replace(LOOM_PLACEHOLDER, p.loomUrl), p.coverLetter);
-  await addFeedback({ kind: "draft", refId: String(id), rating: changed > 0.9 ? 1 : 0, reason: null, data: { similarity: changed, promptVersion: p.promptVersion, model: p.model } });
-  return (await updateProposal(id, { status: "approved", approvedAt: new Date().toISOString() }))!;
+  const original = p.loomUrl ? p.originalDraft.replace(LOOM_PLACEHOLDER, p.loomUrl) : stripLoomLine(p.originalDraft);
+  const changed = similarity(original, cover);
+  await addFeedback({ kind: "draft", refId: String(id), rating: changed > 0.9 ? 1 : 0, reason: null, data: { similarity: changed, promptVersion: p.promptVersion, model: p.model, loom: !!p.loomUrl } });
+  return (await updateProposal(id, { coverLetter: cover, status: "approved", approvedAt: new Date().toISOString(), previewId: null }))!;
 }
 
 /** Night auto-apply only: approve an auto-drafted proposal without a Loom video (the "Loom:" line is removed). */
 export async function approveAuto(id: number): Promise<Proposal> {
   const p = await must(id);
-  if (p.status !== "needs_loom" && p.status !== "ready") throw new GateError(`Can't auto-approve a proposal in status "${p.status}"`);
+  if (!canApprove(p)) throw new GateError(`Can't auto-approve a proposal in status "${p.status}"`);
   const cover = p.loomUrl ? p.coverLetter : stripLoomLine(p.coverLetter);
   if (cover.includes(LOOM_PLACEHOLDER)) throw new GateError("The cover letter still has the Loom placeholder");
   assertClientReady({ coverLetter: cover, answers: p.answers });
@@ -84,11 +98,10 @@ export async function approveAuto(id: number): Promise<Proposal> {
 /** Remove the "Loom: {{LOOM_URL}}" line (and the blank line it leaves) from a draft. */
 export const stripLoomLine = (cover: string) =>
   cover.split("\n").filter((l) => !l.includes(LOOM_PLACEHOLDER)).join("\n").replace(/\n{3,}/g, "\n\n").trim();
-const autoApproved = (p: Proposal) => p.preview?.auto === true;
-
 export async function preview(id: number): Promise<Proposal> {
   const p = await must(id);
-  if (p.status !== "approved" || !p.approvedAt || (!p.loomUrl && !autoApproved(p))) throw new GateError("Approve the proposal (with its Loom video) first");
+  if (p.status !== "approved" || !p.approvedAt) throw new GateError("Approve the proposal first");
+  if (p.coverLetter.includes(LOOM_PLACEHOLDER)) throw new GateError("The cover letter still has the Loom placeholder");
   if (p.bid == null || p.bid <= 0) throw new GateError("Set a bid amount first");
   assertClientReady(p);
 
@@ -147,7 +160,8 @@ export async function submit(id: number, confirmText: string): Promise<Proposal>
   const p = await must(id);
   if (confirmText !== "SUBMIT") throw new GateError('Type SUBMIT to confirm');
   if (p.status !== "previewed" || !p.previewId) throw new GateError("Build the Upwork preview first");
-  if ((!p.loomUrl && !autoApproved(p)) || !p.approvedAt) throw new GateError("Loom video and approval are required");
+  if (!p.approvedAt) throw new GateError("Approval is required");
+  if (p.coverLetter.includes(LOOM_PLACEHOLDER)) throw new GateError("The cover letter still has the Loom placeholder");
   const type = (p.preview?.type as string | undefined) ?? "proposal";
   const r = await callTool<Record<string, unknown>>("confirm_preview", "confirm", { type, preview_id: p.previewId });
   await setJobStatus(p.jobId, "applied");
@@ -156,16 +170,18 @@ export async function submit(id: number, confirmText: string): Promise<Proposal>
 
 /**
  * Copy-paste route (David, 2026-10-19): David pasted the text into Upwork himself and sent it there. Nothing is
- * called on Upwork - this only records that he applied. The text must still be client-ready.
+ * called on Upwork - this only records that he applied. The text must still be client-ready. The app copies the
+ * letter without the Loom placeholder line, so the stored letter is brought in line with what was pasted.
  */
 export async function markApplied(id: number): Promise<Proposal> {
   const p = await must(id);
   if (p.status === "submitted") throw new GateError("Already submitted");
   if (p.status === "discarded") throw new GateError("This proposal was discarded");
-  if (p.coverLetter.includes(LOOM_PLACEHOLDER) && !p.loomUrl) throw new GateError("The cover letter still has the Loom placeholder");
-  assertClientReady(p);
+  const cover = p.loomUrl ? p.coverLetter : stripLoomLine(p.coverLetter);
+  if (cover.includes(LOOM_PLACEHOLDER)) throw new GateError("The cover letter still has the Loom placeholder");
+  assertClientReady({ coverLetter: cover, answers: p.answers });
   await setJobStatus(p.jobId, "applied");
-  return (await updateProposal(id, { status: "submitted", submittedAt: new Date().toISOString(), preview: { ...(p.preview ?? {}), manual: true } }))!;
+  return (await updateProposal(id, { coverLetter: cover, status: "submitted", submittedAt: new Date().toISOString(), preview: { ...(p.preview ?? {}), manual: true } }))!;
 }
 
 export async function discard(id: number): Promise<Proposal> {

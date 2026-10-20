@@ -8,11 +8,12 @@
  *                       in this result - they teach the evening-peak window which hours matter.
  *   npm run -s governor -- status
  *   npm run -s governor -- resume                             human only, after Upwork support restores access
+ *   npm run -s governor -- cooldown <minutes>                 human only: pause all calls; if nothing fails, back to L0 after
  *   npm run -s governor -- mark-restricted "<message>"        record a restriction seen elsewhere (no Telegram)
  * Categories: most_recent, best_match (smart_search), saved_query, keyword (search). A raw "tool.action" label
  * also works for other calls. Calls checked here are counted with the worker's in one shared budget.
  */
-import { decide, governorStatus, markRestricted, nextCategory, noteJobs, record, resume, type CallMeta } from "@/lib/upwork/governor";
+import { coolDown, decide, governorStatus, markRestricted, nextCategory, noteJobs, record, resume, type CallMeta } from "@/lib/upwork/governor";
 
 const flag = (name: string) => { const i = process.argv.indexOf(`--${name}`); return i > 0 ? Math.max(0, Number(process.argv[i + 1]) || 0) : 0; };
 
@@ -64,6 +65,13 @@ async function main(): Promise<number> {
       await resume();
       console.log("RESUMED at slow-down level L2 (20 min per category); it speeds up after clean hours");
       return 0;
+    case "cooldown": {
+      const minutes = Number(a);
+      if (!Number.isFinite(minutes) || minutes < 0 || minutes > 240) throw new Error("cooldown needs minutes (0-240; 0 ends it now)");
+      const until = await coolDown(minutes);
+      console.log(`COOL-DOWN until ${new Date(until).toISOString()}; then the normal schedule if nothing was throttled`);
+      return 0;
+    }
     case "mark-restricted":
       await markRestricted(a ?? "restricted");
       console.log("MARKED restricted");

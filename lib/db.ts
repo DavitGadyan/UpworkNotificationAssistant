@@ -42,7 +42,7 @@ export const DEFAULT_SETTINGS: Settings = {
   workingHours: { days: [1, 2, 3, 4, 5], start: "09:00", end: "18:00", timezone: process.env.DEFAULT_TIMEZONE ?? "UTC" },
   source: "auto",
   guard: { maxEnrichPerCycle: 5, dailyCallCap: 2800, jitterSec: 30, minGapMs: 4000 },
-  upwork: { poller: "chat", peak: { enabled: true, timezone: "Asia/Yerevan", start: "18:00", end: "01:00", peakEveryMin: 4, offPeakEveryMin: 7, reservePct: 60, learn: true } },
+  upwork: { poller: "chat", peak: { enabled: true, timezone: "Asia/Yerevan", start: "18:00", end: "01:00", peakEveryMin: 4, offPeakEveryMin: 7, reservePct: 60, learn: true }, recoverAfterMin: 30, jobOpensPerDay: 500 },
   watch: { enabled: true, intervalMin: 60, maxHours: 72 },
   llm: { enabled: true, provider: "api", rankingModel: "claude-sonnet-5-5", writerModel: "claude-opus-5-5", maxRankPerCycle: 20, dailyBudgetUsd: 5, prepaidCreditUsd: null, creditSetAt: null },
   rules: DEFAULT_RULES,
@@ -287,6 +287,14 @@ export async function listNotifications(jobId?: string): Promise<NotificationRow
     `select * from public.notifications ${jobId ? "where job_id = $1" : ""} order by created_at desc limit 500`, jobId ? [jobId] : [],
   );
   return rows.map((r) => ({ id: Number(r.id), jobId: r.job_id, channel: r.channel, ok: r.ok, detail: r.detail, title: r.title, score: r.score, createdAt: iso(r.created_at) }));
+}
+/** Job alerts sent to Telegram since `since` (ms): by the app's pipeline and by the chat watch loop (detail "watch loop"). */
+export async function alertCounts(since: number): Promise<{ app: number; watch: number }> {
+  const r = await one<{ app: number; watch: number }>(
+    `select count(*) filter (where coalesce(detail, '') <> 'watch loop')::int as app, count(*) filter (where detail = 'watch loop')::int as watch
+     from public.notifications where channel = 'telegram' and ok and created_at >= $1`, [since],
+  );
+  return { app: r?.app ?? 0, watch: r?.watch ?? 0 };
 }
 /** Successful calls since `since` (ms), plus the most recent one - for cooldown and daily cap. */
 export async function callStats(since: number): Promise<{ count: number; lastAt: number | null }> {

@@ -1,5 +1,6 @@
 import { getJob, getProposalOutcome, listProposalOutcomes, listProposals, saveProposalOutcome, updateProposal, dueProposalOutcomes } from "../db";
 import { currentFieldSpec } from "../ranking/fieldSpec";
+import { noteViews } from "./kpis";
 import { assessProfileFit } from "../ranking/profileFit";
 import type { OutcomeJob, OutcomeLabel, ProposalOutcome } from "../types";
 import { callTool } from "../upwork/mcp/client";
@@ -12,6 +13,8 @@ import { isClientReply, isInvite, parseProposalDetail, parseProposalList, parseS
  *   loss_viewed    viewed, but no reply within 7 days (or the job closed without one) - the letter didn't convince
  *   loss_unviewed  never viewed within 7 days (or closed unviewed) - job choice, timing or first line didn't earn a click
  *   pending        younger than 7 days, no reply yet
+ *   (decided early) the client sent an offer or hired on the job without replying to David: loss_viewed if he
+ *                  viewed the proposal, loss_unviewed if he never opened it (David, 2026-10-19).
  *   void           no signal about David: he withdrew, or the client deleted the job (accidental / inappropriate)
  * Freelancers cannot message first on a proposal, so a room with a client message means the client replied.
  * A late reply still flips a loss to a win: rooms are re-checked 1, 3, 7 and 14 days after sending.
@@ -30,11 +33,14 @@ const VOID_REASON = /accidental|inappropriate|duplicate|by mistake|spam/i;
 export const isOffer = (o: Pick<ProposalOutcome, "status">) => o.status === "Offered" || o.status === "Hired";
 export const isHire = (o: Pick<ProposalOutcome, "status">) => o.status === "Hired";
 
-export function classifyOutcome(o: Pick<ProposalOutcome, "status" | "viewed" | "repliedAt" | "submittedAt" | "archiveReason">, now = Date.now()): OutcomeLabel {
+/** The client already sent an offer to, or hired, someone on this job. */
+export const choseSomeoneElse = (job: OutcomeJob | null | undefined) => !!job && ((job.offered ?? 0) > 0 || (job.hired ?? 0) > 0);
+
+export function classifyOutcome(o: Pick<ProposalOutcome, "status" | "viewed" | "repliedAt" | "submittedAt" | "archiveReason"> & { job?: OutcomeJob | null }, now = Date.now()): OutcomeLabel {
   if (o.repliedAt || WIN_STATUS.has(o.status)) return "win";
   if (o.status === "Withdrawn") return "void";
   if (o.status === "Archived" && !o.viewed && o.archiveReason && VOID_REASON.test(o.archiveReason)) return "void";
-  if (CLOSED.has(o.status) || now - Date.parse(o.submittedAt) >= DECIDE_AFTER_DAYS * DAY) return o.viewed ? "loss_viewed" : "loss_unviewed";
+  if (CLOSED.has(o.status) || now - Date.parse(o.submittedAt) >= DECIDE_AFTER_DAYS * DAY || choseSomeoneElse(o.job)) return o.viewed ? "loss_viewed" : "loss_unviewed";
   return "pending";
 }
 
@@ -46,7 +52,7 @@ export function nextReplyCheck(o: Pick<ProposalOutcome, "submittedAt" | "outcome
   return 0;
 }
 
-export interface SyncResult { listed: number; added: number; changed: number; detailed: number; roomChecks: number; newWins: string[]; calls: number; stoppedAtCap: boolean }
+export interface SyncResult { listed: number; added: number; changed: number; detailed: number; roomChecks: number; newWins: string[]; newViews: string[]; calls: number; stoppedAtCap: boolean }
 
 /**
  * One sync pass. Lists every status (sorted by last change), fills cover letters + job snapshots for new rows,
@@ -62,7 +68,7 @@ export async function syncProposalOutcomes(opts: { mode?: "light" | "full"; page
   const pages = light ? 1 : opts.pages ?? 2;
   const since = new Date(now - (opts.sinceDays ?? 120) * DAY).toISOString();
   const maxCalls = opts.maxCalls ?? 40;
-  const res: SyncResult = { listed: 0, added: 0, changed: 0, detailed: 0, roomChecks: 0, newWins: [], calls: 0, stoppedAtCap: false };
+  const res: SyncResult = { listed: 0, added: 0, changed: 0, detailed: 0, roomChecks: 0, newWins: [], newViews: [], calls: 0, stoppedAtCap: false };
   const call = async <T,>(tool: string, action: string, params: Record<string, unknown>): Promise<T> => {
     if (res.calls >= maxCalls) { res.stoppedAtCap = true; throw new CapReached(); }
     res.calls++;
@@ -116,14 +122,16 @@ export async function syncProposalOutcomes(opts: { mode?: "light" | "full"; page
       res.detailed++;
     }
 
-    // 3. Due room checks: did the client write?
+    // 3. Due room checks: did the client write? Unanswered ones also re-read the job's activity (one governed job
+    //    open): an offer or hire to someone else decides the outcome now instead of after 7 days.
     for (const o of await dueProposalOutcomes(50, now)) {
       const room = await roomReply(o.upworkProposalId, call);
       res.roomChecks++;
       const reply = room?.reply ?? null;
+      let job = o.job && room?.invited ? { ...o.job, invited: true } : o.job;
+      if (!reply && job && o.outcome === "pending") job = await refreshActivity(o.jobId, job, () => { if (res.calls >= maxCalls) { res.stoppedAtCap = true; throw new CapReached(); } res.calls++; });
       const next: ProposalOutcome = {
-        ...o, checks: o.checks + 1, updatedAt: now, roomId: room?.roomId ?? o.roomId,
-        job: o.job && room?.invited ? { ...o.job, invited: true } : o.job,
+        ...o, checks: o.checks + 1, updatedAt: now, roomId: room?.roomId ?? o.roomId, job,
         ...(reply ? { repliedAt: reply.at, firstReply: reply.text } : {}),
       };
       next.outcome = classifyOutcome(next, now);
@@ -135,10 +143,23 @@ export async function syncProposalOutcomes(opts: { mode?: "light" | "full"; page
     if (!(e instanceof CapReached)) throw e;
     opts.log?.(`proposal outcomes: stopped at the ${maxCalls}-call cap, continuing next run`);
   }
+  // When each proposal was first seen viewed - feeds the 24-hour KPIs and the "client viewed" notice.
+  res.newViews = await noteViews(await listProposalOutcomes({ limit: 1000 }), now);
   return res;
 }
 
 class CapReached extends Error {}
+
+/** Re-read interviewed / offered / hired for a job. Any failure (job-open budget spent, job gone) keeps the old snapshot. */
+async function refreshActivity(jobId: string, job: OutcomeJob, countCall: () => void): Promise<OutcomeJob> {
+  countCall(); // throws CapReached at this run's call cap
+  try {
+    const { enrichment: e } = await getJobDetailMcp(jobId);
+    return { ...job, interviewed: e.activity.interviewed, hired: e.activity.hired, offered: e.activity.offered, invites: e.activity.invitesSent, activityAt: Date.now() };
+  } catch {
+    return job;
+  }
+}
 
 async function roomReply(upworkProposalId: string, call: <T>(tool: string, action: string, params: Record<string, unknown>) => Promise<T>): Promise<{ roomId: string; invited: boolean; reply: { at: string; text: string } | null } | null> {
   let room: { id?: string; createdAtDateTime?: string } | undefined;
@@ -169,6 +190,8 @@ async function jobSnapshot(jobId: string, title: string, spec: Awaited<ReturnTyp
       category: cached.category, subcategory: cached.subcategory ?? cached.enrichment?.subcategory ?? null, field: fit.field, fitVerdict: fit.verdict,
       contractType: cached.jobType ?? null, budget, clientCountry: cached.client.country, clientSpent: cached.client.totalSpent, clientHires: cached.client.totalHires,
       interviewed: cached.enrichment?.activity.interviewed ?? null, hired: cached.enrichment?.activity.hired ?? null,
+      offered: cached.enrichment?.activity.offered ?? null, invites: cached.enrichment?.activity.invitesSent ?? null,
+      clientId: cached.enrichment?.clientId ?? null,
       rank: cached.score.total, rulesScore: cached.score.rules?.score ?? null, llmFit: cached.score.llm?.fit ?? null,
       flags: cached.score.rules?.flags.map((f) => f.code) ?? [], ruleCategory: cached.score.rules?.category ?? null,
       description: (cached.enrichment?.description || cached.description).slice(0, 1500),
@@ -185,7 +208,8 @@ async function jobSnapshot(jobId: string, title: string, spec: Awaited<ReturnTyp
       category, subcategory, field: fit.field, fitVerdict: fit.verdict, contractType: hourly ? "hourly" : null,
       budget: hourly ? `$${patch.hourlyMin ?? "?"}-${patch.hourlyMax ?? "?"}/hr` : null,
       clientCountry: patch.client?.country ?? null, clientSpent: e.record.totalSpent, clientHires: e.record.hires,
-      interviewed: e.activity.interviewed, hired: e.activity.hired, rank: null, rulesScore: null, llmFit: null, flags: [], ruleCategory: null,
+      interviewed: e.activity.interviewed, hired: e.activity.hired, offered: e.activity.offered, invites: e.activity.invitesSent,
+      clientId: e.clientId ?? null, activityAt: Date.now(), rank: null, rulesScore: null, llmFit: null, flags: [], ruleCategory: null,
       description: e.description.slice(0, 1500),
     };
   } catch (e) {

@@ -19,6 +19,8 @@
     "governor": "tsx --env-file=.env scripts/governor.ts",
     "ingest": "tsx --env-file=.env scripts/ingest.ts",
     "vouch": "tsx --env-file=.env scripts/vouch.ts",
+    "alerted": "tsx --env-file=.env scripts/alerted.ts",
+    "work-history": "tsx --env-file=.env scripts/work-history.ts",
     "calls": "tsx --env-file=.env scripts/calls.ts",
     "api:schema": "tsx --env-file=.env scripts/api-schema.ts",
     "gateway": "node gateway/server.ts"

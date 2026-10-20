@@ -76,6 +76,18 @@ describe("outcome labels", () => {
     expect(classifyOutcome(o({ status: "Archived", archiveReason: "Accidental job posting creation" }), NOW)).toBe("void");
     expect(classifyOutcome(o({ status: "Withdrawn" }), NOW)).toBe("void");
   });
+  it("decides early when the client already offered or hired someone else", () => {
+    const job = { offered: 1, hired: 0 } as unknown as ProposalOutcome["job"];
+    expect(classifyOutcome({ ...o({ submittedAt: ago(1) }), job }, NOW)).toBe("loss_unviewed");
+    expect(classifyOutcome({ ...o({ submittedAt: ago(1), viewed: true }), job }, NOW)).toBe("loss_viewed");
+    expect(classifyOutcome({ ...o({ submittedAt: ago(1) }), job: { offered: 0, hired: 0 } as unknown as ProposalOutcome["job"] }, NOW)).toBe("pending");
+    expect(classifyOutcome({ ...o({ submittedAt: ago(1), repliedAt: ago(0) }), job }, NOW)).toBe("win");
+  });
+  it("reads the opener a client sees in the list", async () => {
+    const { openerText } = await import("@/lib/agents/proposal");
+    expect(openerText("Hi Alan,\n\nYour app already works; what blocks November is the payment flow and store review. I took two apps through that last month.\n\nLoom: x"))
+      .toBe("Your app already works; what blocks November is the payment flow and store review. I took two apps through that last month.");
+  });
 });
 
 describe("syncProposalOutcomes", () => {
