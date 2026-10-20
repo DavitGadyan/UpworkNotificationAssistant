@@ -123,7 +123,7 @@ export default function SettingsScreen() {
       haptic.error(); setMsg({ tone: "bad", text: "Auto-apply: times must be HH:MM and max per night 0–20." }); return;
     }
     if (peakMin == null || offPeakMin == null || recoverMin == null || opensPerDay == null || !hm.test(form.peakStart) || !hm.test(form.peakEnd)) {
-      haptic.error(); setMsg({ tone: "bad", text: "Peak: times must be HH:MM, peak 4–30 min, off-peak 4–60 min, back to normal 10–240 min, job opens 60–300." }); return;
+      haptic.error(); setMsg({ tone: "bad", text: "Peak: times must be HH:MM, peak 4–30 min, off-peak 4–60 min, back to normal 10–240 min, job opens 60–600." }); return;
     }
     if (telegramMin == null || poll == null || minRank == null || cap == null || !Number.isFinite(budget) || budget < 0) {
       haptic.error(); setMsg({ tone: "bad", text: "Check the numbers - one of them isn't valid." }); return;
@@ -212,7 +212,7 @@ export default function SettingsScreen() {
             <Field label="Back to normal after a warning (min)" value={form.recoverMin} onChangeText={(t) => set("recoverMin", t.replace(/\D/g, ""))} keyboardType="number-pad"
               hint="10–240. After Upwork slows us down, the watcher re-checks this long after the last warning and returns to the times above." />
             <Field label="Job opens per day" value={form.opensPerDay} onChangeText={(t) => set("opensPerDay", t.replace(/\D/g, ""))} keyboardType="number-pad"
-              hint="60–300. Opening a job shows the client's history. Clean days peaked near 380; Upwork started throttling near 750." />
+              hint="60–600, default 500, resets 04:00. Opening a job shows the client's history. Clean days peaked near 380; Upwork started throttling near 750." />
           </Card>
 
           <SectionTitle>Auto-draft</SectionTitle>

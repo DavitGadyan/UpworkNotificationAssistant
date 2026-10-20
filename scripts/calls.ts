@@ -50,7 +50,7 @@ async function report(): Promise<number> {
     "Calls per day": `${await dailyCap()} (hard cap ${LIMITS.hardDailyCap})`,
     "Calls per hour": LIMITS.hourly,
     "Searches per day": LIMITS.searchPerDay,
-    "Job opens per day": `${await getsPerDay()} (Settings, 60–300)`,
+    "Job opens per day": `${await getsPerDay()} (Settings, 60–600, default 500)`,
     "Same job re-opened": `at most once per ${LIMITS.sameJobMs / 36e5} h, never after a refusal`,
   };
   writeFileSync("docs/upwork-call-history.md", callReport(rows, limits) + "\n");
