@@ -2,7 +2,7 @@ import { router } from "expo-router";
 import { View } from "react-native";
 import type { Tone } from "../theme";
 import type { ArmStat, LabBoard } from "../types";
-import { Card, PressableScale, Pill, Row, Stat, T } from "./ui";
+import { Card, PressableScale, Pill, Row, T, Tile } from "./ui";
 
 export const VERDICT: Record<string, { label: string; tone: Tone }> = {
   best: { label: "Clear winner", tone: "good" },
@@ -18,14 +18,14 @@ export function Funnel({ f }: { f: LabBoard["funnel"] }) {
   return (
     <View style={{ gap: 8 }}>
       <Row gap={8}>
-        <View style={{ flex: 1 }}><Stat label="Sent" value={f.sent} sub={`${f.decided} with a result`} /></View>
-        <View style={{ flex: 1 }}><Stat label="Viewed" value={pct(f.viewed, f.decided)} /></View>
-        <View style={{ flex: 1 }}><Stat label="Replied" value={pct(f.replied, f.decided)} tone="good" /></View>
+        <Tile label="Sent" value={f.sent} sub={`${f.decided} decided`} />
+        <Tile label="Viewed" value={pct(f.viewed, f.decided)} />
+        <Tile label="Replied" value={pct(f.replied, f.decided)} tone="good" />
       </Row>
       <Row gap={8}>
-        <View style={{ flex: 1 }}><Stat label="Offers" value={pct(f.offers, f.decided)} sub={`${f.offers}`} /></View>
-        <View style={{ flex: 1 }}><Stat label="Hired" value={pct(f.hires, f.decided)} sub={`${f.hires}`} tone="good" /></View>
-        <View style={{ flex: 1 }}><Stat label="Connects" value={f.connects} /></View>
+        <Tile label="Offers" value={pct(f.offers, f.decided)} sub={`${f.offers}`} />
+        <Tile label="Hired" value={pct(f.hires, f.decided)} sub={`${f.hires}`} tone="good" />
+        <Tile label="Connects" value={f.connects} />
       </Row>
     </View>
   );
@@ -36,11 +36,17 @@ export function ArmRow({ a, prompt }: { a: ArmStat; prompt: LabBoard["prompt"] }
   return (
     <PressableScale onPress={() => router.push({ pathname: "/prompt/[id]", params: { id: String(a.arm), p: prompt === "job_ranking" ? "ranker" : "writer" } })} accessibilityLabel={a.label}>
       <Card style={{ gap: 6 }}>
-        <Row gap={6} wrap style={{ justifyContent: "space-between" }}>
-          <T weight="semibold">{a.label}</T>
-          {a.pBest != null ? <Pill label={`${a.pBest}% chance best`} tone={a.pBest >= 80 ? "good" : "neutral"} /> : <Pill label="baseline" />}
+        <Row gap={6} style={{ justifyContent: "space-between" }}>
+          <T weight="semibold" numberOfLines={1} style={{ flex: 1 }}>{a.label}</T>
+          {a.pBest != null ? <Pill label={`${a.pBest}% best`} tone={a.pBest >= 80 ? "good" : "neutral"} /> : <Pill label="baseline" />}
         </Row>
-        <T muted size={13}>{a.n} sent · viewed {a.viewRate}% · replied {a.wins} ({a.replyRate}%) · offers {a.offers} · hired {a.hires} ({a.hireRate}%){a.kept != null ? ` · text kept ${a.kept}%` : ""}</T>
+        <Row wrap gap={6}>
+          <Pill label={`${a.n} sent`} />
+          <Pill label={`👀 ${a.viewRate}%`} />
+          <Pill label={`💬 ${a.replyRate}%`} tone="good" />
+          <Pill label={`✓ ${a.hires} hired`} tone={a.hires ? "good" : "neutral"} />
+          {a.kept != null ? <Pill label={`kept ${a.kept}%`} /> : null}
+        </Row>
       </Card>
     </PressableScale>
   );

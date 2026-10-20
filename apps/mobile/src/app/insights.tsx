@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Alert, View } from "react-native";
 import Svg, { Circle, G, Line, Path, Rect, Text as SvgText } from "react-native-svg";
 import { WhatWins } from "../components/whatWins";
-import { Banner, Bullets, Button, Card, Divider, Empty, KV, Pill, Row, Screen, SectionTitle, T } from "../components/ui";
+import { Banner, Button, Card, Divider, Empty, KV, ListRow, Pill, PressableScale, Row, Screen, SectionTitle, T, Tile } from "../components/ui";
 import { endpoints } from "../lib/api";
 import { fetchLatestReport, fetchSnapshots, useQuery } from "../lib/data";
 import { compactMoney, fmtDate, intentLabel } from "../lib/format";
@@ -22,6 +22,8 @@ function RunButton({ action, label, confirm, onDone }: { action: Action; label: 
   };
   return <Button small label={label} loading={busy} onPress={() => (confirm ? Alert.alert(label, confirm, [{ text: "Cancel", style: "cancel" }, { text: "Run", onPress: go }]) : go())} />;
 }
+
+const showList = (title: string, items: string[]) => Alert.alert(title, items.map((x) => `• ${x}`).join("\n\n"));
 
 const monthLabel = (p: string) => new Date(`${p}-01T12:00:00Z`).toLocaleDateString("en-US", { month: "short" });
 
@@ -109,7 +111,7 @@ function GhostCard({ r }: { r: GhostReport }) {
   const chance = (v: number | null) => (v == null ? c.muted : v < 35 ? c.bad : v < 60 ? c.warn : c.good);
   return (
     <>
-      <T faint size={12}>{r.jobsAssessed} jobs assessed · built {fmtDate(r.builtAt)}. Advisory - never changes your rank.</T>
+      <T faint size={12}>{r.jobsAssessed} jobs · {fmtDate(r.builtAt)}</T>
       {r.byArchetype.length ? (
         <View style={{ gap: 10 }}>
           {r.byArchetype.map((a) => (
@@ -129,25 +131,26 @@ function GhostCard({ r }: { r: GhostReport }) {
       ) : <T muted size={14}>No assessed jobs yet.</T>}
 
       <Divider />
-      <T muted size={13} weight="medium">Outcomes · tracked / hired / closed, no hire / still open</T>
+      <T muted size={12} weight="medium">Outcomes · tracked / hired / no hire / open</T>
       {r.outcomes.length ? r.outcomes.map((o) => (
         <KV key={o.archetype} label={intentLabel(o.archetype)} value={`${o.tracked} / ${o.hired} / ${o.closedNoHire} / ${o.open}`} />
-      )) : <T muted size={14}>Nothing tracked yet - outcomes are checked ~2 and ~7 days after posting.</T>}
+      )) : <T muted size={13}>Nothing tracked yet</T>}
 
       <Divider />
-      <T muted size={13} weight="medium">Clients who post without hiring</T>
+      <T muted size={12} weight="medium">Post without hiring</T>
       {r.topClients.length ? r.topClients.slice(0, 6).map((cl) => (
         <KV key={cl.clientId} label={`${cl.country ?? "Unknown"} · #${cl.clientId.slice(-6)}`} value={`${cl.jobsSeen} posts · ${cl.closedNoHire} no hire`} tone={cl.closedNoHire ? "bad" : undefined} />
-      )) : <T muted size={14}>No repeat posters yet.</T>}
+      )) : <T muted size={13}>None yet</T>}
 
-      <Divider />
-      <T muted size={13} weight="medium">Suggestions (not applied — your rules are unchanged)</T>
-      {r.suggestions.map((sg, i) => (
-        <View key={i} style={{ gap: 2, padding: 12, borderRadius: 12, backgroundColor: c.sunken }}>
-          <T weight="medium" size={14}>{sg.suggestion}</T>
-          <T muted size={13}>{sg.rationale}</T>
-        </View>
-      ))}
+      {r.suggestions.length ? (
+        <>
+          <Divider />
+          <T muted size={12} weight="medium">Suggestions · not applied</T>
+          {r.suggestions.map((sg, i) => (
+            <ListRow key={i} first={i === 0} title={sg.suggestion} right={<T faint size={12}>›</T>} onPress={() => Alert.alert(sg.suggestion, sg.rationale)} />
+          ))}
+        </>
+      ) : null}
     </>
   );
 }
@@ -168,10 +171,10 @@ export default function Insights() {
   return (
     <Screen header={false} padTop={false} onRefresh={refresh} refreshing={snaps.refreshing}>
       <WhatWins />
-      <SectionTitle right={<RunButton action="snapshot" label="Snapshot" confirm="Reads last month's proposals from the marketplace and saves a snapshot." onDone={snaps.reload} />}>Proposal funnel</SectionTitle>
+      <SectionTitle right={<RunButton action="snapshot" label="Snapshot" confirm="Reads last month's proposals and saves a snapshot." onDone={snaps.reload} />}>Funnel</SectionTitle>
       <Card style={{ marginBottom: 16 }}>
         <View onLayout={(e) => setW(e.nativeEvent.layout.width)}>
-          {rows.length && w ? <FunnelChart rows={rows} width={w} /> : <T muted size={14}>{snaps.loading ? "Loading…" : "No monthly snapshots yet. The worker takes one at the start of each month."}</T>}
+          {rows.length && w ? <FunnelChart rows={rows} width={w} /> : <T muted size={13}>{snaps.loading ? "Loading…" : "No snapshots yet (monthly)"}</T>}
         </View>
         {latest ? (
           <>
@@ -191,58 +194,59 @@ export default function Insights() {
       {rows.some((r) => r.data.proposals.sent) && w ? (
         <>
           <SectionTitle>Win rate</SectionTitle>
-          <Card style={{ marginBottom: 16 }}><WinRateChart rows={rows} width={w} /><T faint size={12}>Hired ÷ sent, per month.</T></Card>
+          <Card style={{ marginBottom: 16 }}><WinRateChart rows={rows} width={w} /><T faint size={11}>Hired ÷ sent</T></Card>
         </>
       ) : null}
 
-      <SectionTitle right={<RunButton action="review" label="Run review" confirm="LLM review of the latest month (a few cents)." onDone={review.reload} />}>Monthly review</SectionTitle>
+      <SectionTitle right={<RunButton action="review" label="Run review" confirm="AI review of last month (a few cents)." onDone={review.reload} />}>Review</SectionTitle>
       <Card style={{ marginBottom: 16, gap: 10 }}>
         {review.data ? (
           <>
-            <T weight="semibold">{review.data.data.headline}</T>
-            <T faint size={12}>{review.data.data.period} · built {fmtDate(review.data.data.builtAt)}</T>
-            {review.data.data.whatWorked.length ? <View style={{ gap: 6 }}><T muted size={13} weight="medium">What worked</T><Bullets items={review.data.data.whatWorked} tone="good" /></View> : null}
-            {review.data.data.whatDidnt.length ? <View style={{ gap: 6 }}><T muted size={13} weight="medium">{"What didn't"}</T><Bullets items={review.data.data.whatDidnt} tone="bad" /></View> : null}
-            {review.data.data.actions.length ? <View style={{ gap: 6 }}><T muted size={13} weight="medium">Actions</T><Bullets items={review.data.data.actions} /></View> : null}
+            <T weight="semibold" size={14} numberOfLines={2}>{review.data.data.headline}</T>
+            <T faint size={12}>{review.data.data.period} · {fmtDate(review.data.data.builtAt)}</T>
+            <Row wrap gap={6}>
+              {review.data.data.whatWorked.length ? <PressableScale onPress={() => showList("What worked", review.data!.data.whatWorked)} accessibilityLabel="What worked"><Pill label={`✓ ${review.data.data.whatWorked.length} worked`} tone="good" /></PressableScale> : null}
+              {review.data.data.whatDidnt.length ? <PressableScale onPress={() => showList("What didn't", review.data!.data.whatDidnt)} accessibilityLabel="What didn't"><Pill label={`✗ ${review.data.data.whatDidnt.length} didn't`} tone="bad" /></PressableScale> : null}
+              {review.data.data.actions.length ? <PressableScale onPress={() => showList("Actions", review.data!.data.actions)} accessibilityLabel="Actions"><Pill label={`→ ${review.data.data.actions.length} actions`} tone="info" /></PressableScale> : null}
+            </Row>
           </>
-        ) : <T muted size={14}>No review yet.</T>}
+        ) : <T muted size={13}>No review yet</T>}
       </Card>
 
-      <SectionTitle right={<RunButton action="coach" label="Run coach" confirm="Benchmarks top peers and writes profile advice (LLM, ~$0.30)." onDone={coach.reload} />}>Profile coach</SectionTitle>
+      <SectionTitle right={<RunButton action="coach" label="Run coach" confirm="Benchmarks top peers (AI, ~$0.30)." onDone={coach.reload} />}>Coach</SectionTitle>
       <Card style={{ marginBottom: 16, gap: 10 }}>
         {coach.data ? (
           <>
-            <T weight="semibold">{coach.data.data.headline}</T>
+            <T weight="semibold" size={14} numberOfLines={2}>{coach.data.data.headline}</T>
             {coach.data.data.recommendations.slice(0, 4).map((r, i) => (
-              <View key={i} style={{ gap: 4 }}>
-                <Row gap={6}><Pill label={r.area.replace("_", " ")} /><Pill label={r.impact} tone={r.impact === "high" ? "good" : r.impact === "medium" ? "info" : "neutral"} /></Row>
-                <T>{r.change}</T>
-                {r.newText ? <T muted size={14} selectable>“{r.newText}”</T> : null}
-                <T faint size={12}>{r.why}</T>
-              </View>
+              <ListRow key={i} first={i === 0} icon={<Pill label={r.impact} tone={r.impact === "high" ? "good" : r.impact === "medium" ? "info" : "neutral"} />}
+                title={r.change} meta={r.area.replace("_", " ")} right={<T faint size={12}>›</T>}
+                onPress={() => Alert.alert(r.change, [r.newText ? `“${r.newText}”` : "", r.why].filter(Boolean).join("\n\n"))} />
             ))}
           </>
-        ) : <T muted size={14}>No coach report yet.</T>}
+        ) : <T muted size={13}>No report yet</T>}
       </Card>
 
-      <SectionTitle right={<RunButton action="icp" label="Rebuild" onDone={icp.reload} />}>Ideal client profile</SectionTitle>
+      <SectionTitle right={<RunButton action="icp" label="Rebuild" onDone={icp.reload} />}>Best clients</SectionTitle>
       <Card style={{ marginBottom: 16 }}>
         {icp.data ? (
           <>
-            <KV label="Gross, last 12 months" value={compactMoney(icp.data.data.totalGross)} />
-            <KV label="Avg top contract" value={compactMoney(icp.data.data.avgTopContract)} />
-            <KV label="Contracts" value={icp.data.data.contracts} />
-            {icp.data.data.top.slice(0, 3).map((t) => <KV key={t.contractId} label={t.title} value={compactMoney(t.gross)} />)}
-            {icp.data.data.notes.length ? <><Divider /><Bullets items={icp.data.data.notes} /></> : null}
+            <Row gap={8} style={{ marginBottom: 6 }}>
+              <Tile label="12 mo" value={compactMoney(icp.data.data.totalGross)} />
+              <Tile label="Avg top" value={compactMoney(icp.data.data.avgTopContract)} />
+              <Tile label="Contracts" value={icp.data.data.contracts} />
+            </Row>
+            {icp.data.data.top.slice(0, 3).map((t, i) => <ListRow key={t.contractId} first={i === 0} title={t.title} right={<T weight="semibold" size={13}>{compactMoney(t.gross)}</T>} />)}
+            {icp.data.data.notes.length ? <Button small variant="ghost" label={`${icp.data.data.notes.length} notes`} onPress={() => showList("Notes", icp.data!.data.notes)} /> : null}
           </>
-        ) : <T muted size={14}>Not built yet.</T>}
+        ) : <T muted size={13}>Not built yet</T>}
       </Card>
 
       <SectionTitle right={<RunButton action="calibrate" label="Recalibrate" onDone={cal.reload} />}>Calibration</SectionTitle>
       <Card style={{ marginBottom: 16, gap: 8 }}>
         {cal.data ? (
           <>
-            <T>{cal.data.data.message}</T>
+            <PressableScale onPress={() => Alert.alert("Calibration", cal.data!.data.message)} accessibilityLabel="Calibration message"><T size={14} numberOfLines={2}>{cal.data.data.message}</T></PressableScale>
             {cal.data.data.proposed ? (
               <>
                 <KV label="Alert threshold" value={cal.data.data.proposed.telegramMin} />
@@ -251,11 +255,11 @@ export default function Insights() {
               </>
             ) : null}
           </>
-        ) : <Empty title="No calibration yet">Rate alerts with 👍/👎 - after 20 ratings the ranking can be tuned to you.</Empty>}
+        ) : <Empty title="No calibration yet">Needs 20 👍/👎 ratings</Empty>}
       </Card>
-      <SectionTitle right={<RunButton action="ghosts" label="Rebuild" onDone={ghosts.reload} />}>Ghost patterns</SectionTitle>
+      <SectionTitle right={<RunButton action="ghosts" label="Rebuild" onDone={ghosts.reload} />}>Ghost clients</SectionTitle>
       <Card style={{ marginBottom: 16, gap: 10 }}>
-        {ghosts.data ? <GhostCard r={ghosts.data.data} /> : <T muted size={14}>{ghosts.loading ? "Loading…" : "No report yet. Rebuild groups recent jobs by hire-likelihood pattern."}</T>}
+        {ghosts.data ? <GhostCard r={ghosts.data.data} /> : <T muted size={13}>{ghosts.loading ? "Loading…" : "No report yet"}</T>}
       </Card>
       {snaps.error ? <Banner tone="bad">{snaps.error}</Banner> : null}
       <View style={{ height: 1, backgroundColor: c.ground }} />

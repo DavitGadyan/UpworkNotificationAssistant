@@ -3,17 +3,26 @@ import { useState } from "react";
 import { Alert, View } from "react-native";
 import { NoAccessBanner } from "../../components/access";
 import { isOffProfile } from "../../components/job";
-import { IconBell, IconBriefcase, IconDoc, IconEye, IconSpark } from "../../components/icons";
-import { Banner, Button, Card, Divider, KV, Pill, Row, Screen, SectionTitle, Stat, T } from "../../components/ui";
+import { IconBell, IconBriefcase, IconChart, IconDoc, IconEye, IconFeed, IconRefresh, IconSearch, IconSpark } from "../../components/icons";
+import { Banner, Button, Card, Dot, ListRow, Meter, Pill, Row, Screen, SectionTitle, T, Tile } from "../../components/ui";
 import { endpoints, getHealth, getHealthFull } from "../../lib/api";
 import { config } from "../../lib/config";
 import { fetchFeeds, fetchJobs, fetchNotificationsSince, fetchProposals, fetchWatch, useQuery } from "../../lib/data";
 import { timeAgo, usd } from "../../lib/format";
 import { haptic } from "../../lib/haptics";
 import { useSettings } from "../../lib/settings";
-import { useTheme } from "../../theme";
+import { useTheme, type Tone } from "../../theme";
+
+/*
+ * Overview (compact, 2026-10-20): numbers first, one-word labels, details on tap.
+ *   tiles      - new jobs, alerts, watching, drafts
+ *   Upwork     - pacing state + day budgets (reset 04:00 Yerevan)
+ *   Feeds      - one line each: new jobs in 24 h; lateness only matters when the worker is the searcher
+ *   Costs      - AI $ today as a meter, 7 / 30 days, Connects
+ */
 
 const DAY = 864e5;
+const STATE: Record<string, { label: string; tone: Tone }> = { normal: { label: "Normal", tone: "good" }, slow: { label: "Slowed", tone: "warn" }, stopped: { label: "Stopped", tone: "bad" } };
 
 export default function Overview() {
   const { c } = useTheme();
@@ -35,7 +44,7 @@ export default function Overview() {
   const new24 = all.filter((j) => j.fetchedAtMs >= since).length;
   const alerts = (notes.data ?? []).filter((n) => n.ok).length;
   const watching = (watch.data ?? []).filter((w) => !w.done).length;
-  const needLoom = (props.data ?? []).filter((p) => p.status === "needs_loom" || p.status === "draft").length;
+  const toReview = (props.data ?? []).filter((p) => p.status === "needs_loom" || p.status === "draft").length;
   const toApprove = (props.data ?? []).filter((p) => p.status === "ready" || p.status === "approved" || p.status === "previewed").length;
 
   const refreshing = jobs.refreshing || health.refreshing;
@@ -43,95 +52,122 @@ export default function Overview() {
 
   function loadViaClaude() {
     const enabled = (feeds.data ?? []).filter((f) => f.enabled).length || 1;
-    Alert.alert(
-      "Load jobs via Claude?",
-      `Runs one fetch of every enabled feed through the home worker's Claude login. Costs about $0.15 per feed on the Claude plan (≈ $${(enabled * 0.15).toFixed(2)} for ${enabled} feed${enabled === 1 ? "" : "s"}). New jobs appear here as they are ranked.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Load", onPress: async () => {
-            setLoading(true);
-            try { const r = await endpoints.fetchViaClaude(); haptic.success(); Alert.alert("Fetch started", r?.message ?? "New jobs will appear as they are ranked."); }
-            catch (e) { haptic.error(); Alert.alert("Could not start the fetch", (e as Error).message); }
-            finally { setLoading(false); }
-          },
+    Alert.alert("Load via Claude?", `One fetch of every enabled feed · ≈ $${(enabled * 0.15).toFixed(2)}`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Load", onPress: async () => {
+          setLoading(true);
+          try { const r = await endpoints.fetchViaClaude(); haptic.success(); Alert.alert("Started", r?.message ?? "New jobs appear as they are ranked."); }
+          catch (e) { haptic.error(); Alert.alert("Could not start", (e as Error).message); }
+          finally { setLoading(false); }
         },
-      ],
-    );
+      },
+    ]);
   }
 
   const h = health.data;
+  const hf = healthFull.data;
+  const pace = hf?.pacing;
+  const workerPolls = (pace?.poller ?? settings.settings?.upwork?.poller) === "worker";
   const paused = settings.settings?.alertsPaused;
+  const st = pace ? STATE[pace.state] ?? STATE.normal : null;
+  const mutedIcon = (I: typeof IconBell) => <I size={14} color={c.muted} cut={c.surface} />;
 
   return (
-    <Screen title="Overview" subtitle="Every feed in one place: what it found, what matched, what reached you." onRefresh={refresh} refreshing={refreshing}>
-      {config.demo ? <Banner tone="info" title="Demo mode">Showing fixture data from src/demo.ts - nothing here is live.</Banner> : null}
+    <Screen title="Overview" onRefresh={refresh} refreshing={refreshing}>
+      {config.demo ? <Banner tone="info" title="Demo mode">Fixture data - nothing is live.</Banner> : null}
       <NoAccessBanner show={settings.noAccess} />
-      {healthFull.data?.aiRanking?.paused ? (
-        <Banner tone="warn" title="AI ranking paused">
-          {`${healthFull.data.aiRanking.reason ?? "Daily AI budget reached"}. New jobs wait for the AI check and nothing is alerted on rules alone. It resumes at 00:00 UTC, or raise the budget in Settings.`}
-        </Banner>
-      ) : null}
-      {paused ? <Banner tone="warn" title="Alerts are paused">No pushes or calls go out until you resume them in Settings.</Banner> : null}
+      {hf?.aiRanking?.paused ? <Banner tone="warn" title="AI ranking paused">Daily AI budget reached · resumes 04:00</Banner> : null}
+      {paused ? <Banner tone="warn" title="Alerts paused">Resume in Settings</Banner> : null}
 
-      <View style={{ flexDirection: "row", gap: 12, marginBottom: 12 }}>
-        <Stat label="New jobs · 24h" value={new24} sub="across all feeds" icon={<IconBriefcase size={16} color={c.muted} />} onPress={() => router.navigate("/jobs")} />
-        <Stat label="Alerts sent · 24h" value={alerts} sub="push, message or call" icon={<IconBell size={16} color={c.muted} />} />
-      </View>
-      <View style={{ flexDirection: "row", gap: 12, marginBottom: 20 }}>
-        <Stat label="Watching" value={watching} sub={watching === 1 ? "job's competition" : "jobs' competition"} icon={<IconEye size={16} color={c.muted} />} onPress={() => router.push("/watchlist")} />
-        <Stat label="Drafts to review" value={needLoom} sub={`${toApprove} more to approve`} tone={needLoom ? "warn" : undefined} icon={<IconDoc size={16} color={c.muted} cut={c.surface} />} onPress={() => router.navigate("/proposals")} />
-      </View>
+      <Row gap={8} style={{ marginBottom: 8 }}>
+        <Tile label="New · 24h" value={new24} icon={mutedIcon(IconBriefcase)} onPress={() => router.navigate("/jobs")} />
+        <Tile label="Alerts · 24h" value={alerts} icon={mutedIcon(IconBell)} />
+      </Row>
+      <Row gap={8} style={{ marginBottom: 20 }}>
+        <Tile label="Watching" value={watching} icon={mutedIcon(IconEye)} onPress={() => router.push("/watchlist")} />
+        <Tile label="To review" value={toReview} sub={toApprove ? `+${toApprove} to send` : undefined} tone={toReview ? "warn" : undefined} icon={mutedIcon(IconDoc)} onPress={() => router.navigate("/proposals")} />
+      </Row>
 
-      <SectionTitle right={h ? <Pill label={h.ok ? "All on time" : h.workerStale ? "Worker stalled" : `${h.lateFeeds} late`} tone={h.ok ? "good" : "bad"} /> : <Pill label="Worker offline" tone="neutral" />}>Polling health</SectionTitle>
-      <Card style={{ marginBottom: 20 }}>
-        {h ? <T muted size={13} style={{ marginBottom: 6 }}>Goal: every enabled feed fetched at least once per poll interval; a feed is late after {h.lateAfterMin} min without a success.</T> : null}
-        {(feeds.data ?? []).filter((f) => f.enabled).map((f, i) => {
-          const fj = all.filter((j) => j.feedId === f.id || j.feeds?.includes(f.name));
-          const last = fj.reduce((m, j) => Math.max(m, j.fetchedAtMs), 0);
-          const day = fj.filter((j) => j.fetchedAtMs >= since).length;
-          // Exact worker status when the backend answers; otherwise estimate from stored jobs.
-          const fh = healthFull.data?.feeds.find((x) => x.feedId === f.id);
-          return (
-            <View key={f.id}>
-              {i > 0 ? <Divider /> : null}
-              <Row style={{ justifyContent: "space-between", minHeight: 44 }}>
-                <View style={{ flex: 1 }}>
-                  <T weight="medium" numberOfLines={1}>{f.name}</T>
-                  <T faint size={12}>
-                    {fh
-                      ? `last fetch ${fh.lastOkAt ? timeAgo(new Date(fh.lastOkAt).getTime()) : "never"} · ${fh.successRate24h ?? "-"}% ok 24h${fh.failures ? ` · ${fh.failures} failing` : ""}`
-                      : `${f.kind.replace("_", " ")} · last job ${last ? timeAgo(last) : "never"}`}
-                  </T>
-                  {fh?.late && fh.lastError ? <T size={12} style={{ color: "#c0392b" }} numberOfLines={2}>{fh.lastError}</T> : null}
-                </View>
-                {fh ? <Pill label={fh.late ? "Late" : `${day} new`} tone={fh.late ? "bad" : day ? "info" : "neutral"} /> : <Pill label={`${day} new`} tone={day ? "info" : "neutral"} />}
-              </Row>
-            </View>
-          );
-        })}
-        {!feeds.loading && !(feeds.data ?? []).some((f) => f.enabled) ? <T muted>No enabled feeds.</T> : null}
-      </Card>
-
-      <SectionTitle>Costs</SectionTitle>
-      <Card style={{ marginBottom: 20 }}>
-        {usage.data ? (
+      <SectionTitle right={st ? <Pill label={st.label} tone={st.tone} /> : <Pill label={h ? "No data" : "Worker offline"} tone="neutral" />}>Upwork</SectionTitle>
+      <Card style={{ marginBottom: 20, paddingVertical: 10 }}>
+        {pace ? (
           <>
-            <KV label="Claude today" value={`${usd(usage.data.claude.today)} / ${usd(usage.data.claude.dailyBudget)}`} tone={usage.data.claude.today > usage.data.claude.dailyBudget ? "bad" : undefined} />
-            <KV label="Last 7 days" value={usd(usage.data.claude.last7)} />
-            <KV label="Last 30 days" value={usd(usage.data.claude.last30)} />
-            {usage.data.claude.remainingCredit != null ? <KV label="Prepaid credit left" value={usd(usage.data.claude.remainingCredit)} /> : null}
-            <Divider />
-            <KV label="Marketplace calls today" value={`${usage.data.upwork.callsToday.toLocaleString("en-US")} / ${usage.data.upwork.dailyCap.toLocaleString("en-US")}`} />
-            <KV label="Connects balance" value={usage.data.upwork.connects.balance ?? "—"} />
+            <Row gap={6} style={{ marginBottom: 2 }}>
+              <Dot tone={pace.peak.now ? "info" : "neutral"} />
+              <T muted size={12} numberOfLines={1} style={{ flex: 1 }}>
+                {pace.poller === "chat" ? "Chat" : "Worker"} · every {pace.cadenceMin} min{pace.peak.now ? " · peak" : ""}{pace.level ? ` · L${pace.level}` : ""}
+              </T>
+              <T faint size={12}>resets 04:00</T>
+            </Row>
+            <Meter label="Job opens" used={pace.budgets.get.used} cap={pace.budgets.get.cap} icon={mutedIcon(IconEye)} />
+            <Meter label="Searches" used={pace.budgets.search.used} cap={pace.budgets.search.cap} icon={mutedIcon(IconSearch)} />
+            <Meter label="All calls" used={pace.budgets.day.used} cap={pace.budgets.day.cap} icon={mutedIcon(IconChart)} />
+            <Meter label="This hour" used={pace.budgets.hour.used} cap={pace.budgets.hour.cap} icon={mutedIcon(IconRefresh)} />
+            {pace.lastError && now - Date.parse(pace.lastError.at) < DAY ? (
+              <ListRow first={false} icon={<Dot tone="warn" />} title={`Last warning · ${pace.lastError.cls}`} meta={timeAgo(Date.parse(pace.lastError.at))}
+                onPress={() => Alert.alert("Last Upwork warning", pace.lastError!.detail || pace.lastError!.cls)} />
+            ) : null}
           </>
         ) : (
-          <T muted size={14}>{usage.loading ? "Loading…" : "Costs come from the home worker - offline right now."}</T>
+          <T muted size={13}>{healthFull.loading ? "Loading…" : "Worker offline"}</T>
         )}
       </Card>
 
-      <Button label="Load via Claude" variant="dark" onPress={loadViaClaude} loading={loading} icon={(col) => <IconSpark size={18} color={col} />} />
-      <T faint size={12} style={{ textAlign: "center", marginTop: 8 }}>Manual fetch of every enabled feed · ≈ $0.15 per feed on the Claude plan</T>
+      <SectionTitle right={workerPolls && h && !h.ok ? <Pill label={`${h.lateFeeds} late`} tone="bad" /> : undefined}>Feeds</SectionTitle>
+      <Card style={{ marginBottom: 20, paddingVertical: 4 }}>
+        {(feeds.data ?? []).filter((f) => f.enabled).map((f, i) => {
+          const fj = all.filter((j) => j.feedId === f.id || j.feeds?.includes(f.name));
+          const day = fj.filter((j) => j.fetchedAtMs >= since).length;
+          const last = fj.reduce((m, j) => Math.max(m, j.fetchedAtMs), 0);
+          const fh = hf?.feeds.find((x) => x.feedId === f.id);
+          // Lateness only means something when the worker is the one searching.
+          const late = workerPolls && !!fh?.late;
+          return (
+            <ListRow key={f.id} first={i === 0} icon={<IconFeed size={16} color={late ? c.bad : c.muted} />}
+              title={shortFeed(f.name)} meta={last ? `last job ${timeAgo(last)}` : "no jobs yet"}
+              right={<Pill label={late ? "Late" : `${day}`} tone={late ? "bad" : day ? "info" : "neutral"} />}
+              onPress={late && fh?.lastError ? () => Alert.alert(f.name, fh.lastError!) : undefined} />
+          );
+        })}
+        {!feeds.loading && !(feeds.data ?? []).some((f) => f.enabled) ? <T muted>No feeds</T> : null}
+      </Card>
+
+      <SectionTitle>Costs</SectionTitle>
+      <Card style={{ marginBottom: 16, paddingVertical: 10 }}>
+        {usage.data ? (
+          <>
+            <Meter label="AI today" used={usage.data.claude.today} cap={usage.data.claude.dailyBudget} format={(n) => usd(n)} icon={mutedIcon(IconSpark)} />
+            <Row gap={8} style={{ marginTop: 8 }}>
+              <MiniStat label="7 days" value={usd(usage.data.claude.last7)} />
+              <MiniStat label="30 days" value={usd(usage.data.claude.last30)} />
+              <MiniStat label="Connects" value={String(usage.data.upwork.connects.balance ?? "—")} />
+            </Row>
+          </>
+        ) : (
+          <T muted size={13}>{usage.loading ? "Loading…" : "Worker offline"}</T>
+        )}
+      </Card>
+
+      <Button small label="Load via Claude" variant="dark" onPress={loadViaClaude} loading={loading} icon={(col) => <IconSpark size={16} color={col} />} />
     </Screen>
+  );
+}
+
+/** "Search: LLM, Large, Language, Model…" → "Search · LLM, Large…" */
+function shortFeed(name: string) {
+  const m = name.match(/^(\w+):\s*(.*)$/);
+  if (!m) return name;
+  const rest = m[2].split(/,\s*/).slice(0, 2).join(", ");
+  return `${m[1]} · ${rest}${m[2].split(",").length > 2 ? "…" : ""}`;
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  const { c } = useTheme();
+  return (
+    <View style={{ flex: 1, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: c.sunken }}>
+      <T faint size={11}>{label}</T>
+      <T weight="semibold" size={15} style={{ fontVariant: ["tabular-nums"] }}>{value}</T>
+    </View>
   );
 }

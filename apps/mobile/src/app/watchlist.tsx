@@ -20,8 +20,7 @@ export default function Watchlist() {
 
   return (
     <Screen header={false} padTop={false} onRefresh={() => { watch.refresh(); jobs.refresh(); }} refreshing={watch.refreshing}>
-      <T muted size={14} style={{ marginBottom: 12 }}>After an alert, the proposal count is re-checked so you know when competition piles up.</T>
-      <View style={{ marginBottom: 12 }}><SearchField value={search} onChangeText={setSearch} placeholder="Search watched jobs" /></View>
+      <View style={{ marginBottom: 12 }}><SearchField value={search} onChangeText={setSearch} placeholder="Search" /></View>
       <View style={{ gap: 10 }}>
         {[...active, ...done].map((w) => {
           const j = byId.get(w.job_id);
@@ -31,19 +30,19 @@ export default function Watchlist() {
                 <Row gap={12} style={{ alignItems: "flex-start" }}>
                   {j ? <RankPill total={j.score.total} tone={scoreTone(j.score, th)} /> : null}
                   <View style={{ flex: 1 }}>
-                    <T weight="semibold" numberOfLines={2}>{j?.title ?? `Job ${w.job_id}`}</T>
-                    <T muted size={13}>{w.last_tier ? `${w.last_tier} proposals` : `${w.last_count} proposals`} · watching since {timeAgo(w.started_at)}</T>
+                    <T weight="semibold" numberOfLines={1}>{j?.title ?? `Job ${w.job_id}`}</T>
+                    <T muted size={13} numberOfLines={1}>{w.last_tier ?? w.last_count} bids · since {timeAgo(w.started_at)}</T>
                   </View>
                 </Row>
                 <Row gap={6}>
-                  {w.done ? <Pill label={`Done · ${w.done}`} /> : <Pill label={`Next check ${timeUntil(w.next_at)}`} tone="info" />}
-                  {w.warned ? <Pill label="Competition rising" tone="warn" /> : null}
+                  {w.done ? <Pill label={`Done · ${w.done}`} /> : <Pill label={`Next ${timeUntil(w.next_at)}`} tone="info" />}
+                  {w.warned ? <Pill label="Bids rising" tone="warn" /> : null}
                 </Row>
               </Card>
             </PressableScale>
           );
         })}
-        {!watch.loading && !rows.length ? <Empty title="Not watching anything">Jobs are added automatically when an alert goes out.</Empty> : null}
+        {!watch.loading && !rows.length ? <Empty title="Nothing watched">Added on each alert</Empty> : null}
       </View>
     </Screen>
   );

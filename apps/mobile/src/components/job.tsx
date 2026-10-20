@@ -58,20 +58,19 @@ export function JobCard({ job, th, onPress, onLongPress }: { job: JobView; th: T
           <RankPill total={job.score.total} tone={scoreTone(job.score, th)} />
           <View style={{ flex: 1, gap: 4 }}>
             <T weight="semibold" size={15} numberOfLines={2}>{job.title}</T>
-            <T muted size={13} numberOfLines={1}>{budgetLabel(job)} · {compactMoney(clientSpent(job))} spent · {proposalsLabel(job)}</T>
+            <T muted size={13} numberOfLines={1}>{budgetLabel(job)} · {compactMoney(clientSpent(job))} · {proposalsLabel(job).replace(" proposals", "")} bids</T>
           </View>
         </Row>
         {intent ? <IntentChips intent={intent} /> : null}
         <Row style={{ justifyContent: "space-between" }}>
           <Row gap={6} style={{ flexShrink: 1 }}>
             <Pill label={pill.label} tone={pill.tone} />
-            <T faint size={12} numberOfLines={1} style={{ flexShrink: 1 }}>{timeAgo(job.publishedAt)}{job.feeds?.[0] ? ` · ${job.feeds[0]}` : ""}</T>
+            <T faint size={12} numberOfLines={1} style={{ flexShrink: 1 }}>{timeAgo(job.publishedAt)}{job.feeds?.[0] ? ` · ${job.feeds[0].split(/[:,]/)[0]}` : ""}</T>
           </Row>
           <PressableScale onPress={() => openUpwork(job.url)} accessibilityLabel="Open in Upwork" hitSlop={10}>
-            <Row gap={4} style={{ minHeight: 32, paddingHorizontal: 4 }}>
-              <T size={13} weight="medium" style={{ color: c.accent }}>Open in Upwork</T>
-              <IconExternal size={14} color={c.accent} />
-            </Row>
+            <View style={{ width: 36, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: c.accentSoft }}>
+              <IconExternal size={16} color={c.accent} />
+            </View>
           </PressableScale>
         </Row>
       </Card>
@@ -84,10 +83,10 @@ export function IntentChips({ intent }: { intent: NonNullable<ScoreBreakdown["in
   const { c } = useTheme();
   return (
     <Row wrap gap={6}>
-      <Pill label={`Hire chance ${intent.hireLikelihood}%`} tone={intentTone(intent.ghostRisk)} />
+      <Pill label={`Hire ${intent.hireLikelihood}%`} tone={intentTone(intent.ghostRisk)} />
       {intent.ghostRisk === "high" ? (
         <>
-          <Pill label="Likely not hiring — skip" tone="bad" />
+          <Pill label="Skip" tone="bad" />
           <T size={12} weight="medium" numberOfLines={1} style={{ color: c.bad, flexShrink: 1, alignSelf: "center" }}>{intentLabel(intent.archetype)}</T>
         </>
       ) : null}

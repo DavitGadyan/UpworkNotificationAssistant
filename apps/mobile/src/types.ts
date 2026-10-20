@@ -414,6 +414,16 @@ export interface HealthFull {
   feeds: { feedId: number; name: string; kind: string; lastOkAt: string | null; lastError: string | null; failures: number; successRate24h: number | null; runs24h: number; late: boolean }[];
   /** Paused ⇒ new jobs wait for their AI check; nothing alerts on rules alone. Absent from older workers. */
   aiRanking?: { paused: boolean; since: string | null; reason: string | null };
+  /** Pacing governor (lib/upwork/governor.ts governorStatus). Day budgets reset 04:00 Asia/Yerevan. Absent from older workers. */
+  pacing?: {
+    state: "normal" | "slow" | "stopped";
+    level: number;
+    cadenceMin: number;
+    poller: "chat" | "worker";
+    peak: { now: boolean; window: string; localTime: string };
+    budgets: Record<"day" | "hour" | "search" | "get", { used: number; cap: number }>;
+    lastError: { cls: string; detail: string; at: string } | null;
+  };
 }
 
 /** GET /api/usage. */

@@ -24,31 +24,30 @@ export default function Prompts() {
   return (
     <Screen header={false} padTop={false} onRefresh={rep.refresh} refreshing={rep.refreshing}>
       <Row gap={8} style={{ marginBottom: 12 }}>
-        <Button small label="Proposal writer" variant={tab === "writer" ? "dark" : undefined} onPress={() => setTab("writer")} />
-        <Button small label="Job ranker" variant={tab === "ranker" ? "dark" : undefined} onPress={() => setTab("ranker")} />
+        <Button small label="Writer" variant={tab === "writer" ? "dark" : undefined} onPress={() => setTab("writer")} />
+        <Button small label="Ranker" variant={tab === "ranker" ? "dark" : undefined} onPress={() => setTab("ranker")} />
       </Row>
-      {!b ? <Empty title="No numbers yet"><T muted size={14}>{rep.loading ? "Loading…" : "The worker saves these after each reply check (8 times a day)."}</T></Empty> : (
+      {!b ? <Empty title="No data yet"><T muted size={14}>{rep.loading ? "Loading…" : "Updates 8× a day"}</T></Empty> : (
         <View style={{ gap: 12 }}>
-          <T faint size={12}>Updated {fmtDate(b.builtAt)} · replies are the reward; viewed-no-reply and never-viewed both count against.</T>
+          <T faint size={12}>Updated {fmtDate(b.builtAt)} · reward = reply</T>
           <Card><Funnel f={b.funnel} /></Card>
-          <SectionTitle>{tab === "writer" ? "Writer versions" : "Ranker versions"}</SectionTitle>
+          <SectionTitle>Versions</SectionTitle>
           {b.overall.arms.map((a) => <ArmRow key={a.arm} a={a} prompt={b.prompt} />)}
           {tab === "writer" ? (
             <Card style={{ gap: 8 }}>
-              <T weight="semibold">A/B test {b.config.enabled ? "on" : "off"}</T>
-              <T muted size={13}>{b.config.enabled ? `Drafts are spread over ${b.config.arms.length} versions; the better one gets more.` : b.config.arms.length >= 2 ? `${b.config.arms.length} versions are ready to test.` : "Pick the versions to test on the web (Prompt analytics)."}</T>
+              <Row style={{ justifyContent: "space-between" }}><T weight="semibold">A/B test</T><Pill label={b.config.enabled ? `On · ${b.config.arms.length} versions` : b.config.arms.length >= 2 ? `${b.config.arms.length} ready` : "Pick on web"} tone={b.config.enabled ? "good" : "neutral"} /></Row>
               {b.config.arms.length >= 2 && <Button small label={b.config.enabled ? "Stop test" : "Start test"} loading={busy} onPress={() => toggleTest(!b.config.enabled)} />}
             </Card>
           ) : null}
           {tab === "ranker" && b.byRank?.length ? (
             <>
-              <SectionTitle>By the rank the job had</SectionTitle>
+              <SectionTitle>By job rank</SectionTitle>
               <Card style={{ gap: 6 }}>
-                {b.byRank.map((r) => { const t = r.arms.reduce((s, a) => ({ n: s.n + a.n, w: s.w + a.wins, h: s.h + a.hires }), { n: 0, w: 0, h: 0 }); return <T key={r.key} size={14}>{r.label}: {t.n} sent · {t.w} replied ({t.n ? Math.round((t.w / t.n) * 100) : 0}%) · {t.h} hired</T>; })}
+                {b.byRank.map((r) => { const t = r.arms.reduce((s, a) => ({ n: s.n + a.n, w: s.w + a.wins, h: s.h + a.hires }), { n: 0, w: 0, h: 0 }); return <Row key={r.key} style={{ justifyContent: "space-between" }}><T size={14} style={{ flex: 1 }} numberOfLines={1}>{r.label}</T><T size={13} muted style={{ fontVariant: ["tabular-nums"] }}>{t.n} · {t.n ? Math.round((t.w / t.n) * 100) : 0}% reply · {t.h} hired</T></Row>; })}
               </Card>
             </>
           ) : null}
-          <SectionTitle>Best version per scenario</SectionTitle>
+          <SectionTitle>By scenario</SectionTitle>
           {b.byScenario.map((s) => (
             <Card key={s.key} style={{ gap: 6 }}>
               <T weight="medium">{s.label}</T>

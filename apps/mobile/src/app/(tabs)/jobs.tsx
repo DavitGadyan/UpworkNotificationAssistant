@@ -8,7 +8,8 @@ import { NoAccessBanner } from "../../components/access";
 import { CalendarRange } from "../../components/CalendarRange";
 import { isOffProfile, JobCard, openUpwork } from "../../components/job";
 import { RangeSlider } from "../../components/RangeSlider";
-import { ApiBanner, Banner, Card, Empty, PageTitle, SearchField, Seg, T } from "../../components/ui";
+import { IconFilter } from "../../components/icons";
+import { ApiBanner, Banner, Card, Empty, PageTitle, PressableScale, Row, SearchField, Seg, T } from "../../components/ui";
 import { fetchFeeds, fetchJobs, setJobStatus, useQuery, type JobView } from "../../lib/data";
 import { haptic } from "../../lib/haptics";
 import { DATE_PRESETS, DEFAULT_DATE, dateLabel, inDateFilter, postedMs, type DateFilter, type DatePreset } from "../../lib/jobFilters";
@@ -46,6 +47,7 @@ export default function Jobs() {
   const [now, setNow] = useState(() => Date.now());
   const [feed, setFeed] = useState<string>("all");
   const [search, setSearch] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const term = useDeferredValue(search.trim().toLowerCase());
 
   const list = useMemo(() => {
@@ -80,34 +82,44 @@ export default function Jobs() {
     ]);
   }
 
+  const extra = (score[0] > 0 || score[1] < 100 ? 1 : 0) + (feed !== "all" ? 1 : 0);
   const header = (
-    <View style={{ gap: 10, marginBottom: 12 }}>
-      <PageTitle title="Jobs" subtitle="Newest first. Swipe left or long-press to dismiss." />
+    <View style={{ gap: 8, marginBottom: 10 }}>
+      <PageTitle title="Jobs" />
       <ApiBanner />
       <NoAccessBanner show={noAccess} />
       {jobs.error ? <Banner tone="bad" title="Could not load jobs">{jobs.error}</Banner> : null}
-      <SearchField value={search} onChangeText={setSearch} placeholder="Search title, skills or description" />
+      <Row gap={8}>
+        <View style={{ flex: 1 }}><SearchField value={search} onChangeText={setSearch} placeholder="Search jobs" /></View>
+        <PressableScale onPress={() => { haptic.select(); setFiltersOpen((v) => !v); }} accessibilityLabel="Score and feed filters">
+          <View style={{ minWidth: 44, height: 44, paddingHorizontal: 10, borderRadius: radius.control, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 4, backgroundColor: filtersOpen || extra ? c.ink : c.track }}>
+            <IconFilter size={18} color={filtersOpen || extra ? c.surface : c.ink} />
+            {extra ? <Text style={{ color: c.surface, fontFamily: font.semibold, fontSize: 13 }}>{extra}</Text> : null}
+          </View>
+        </PressableScale>
+      </Row>
       <Seg scroll value={status} onChange={(v) => { haptic.select(); setStatus(v); }} options={[
-        { value: "active", label: "Active" }, { value: "new", label: "New" }, { value: "awaiting_ai", label: "Waiting for AI" }, { value: "notified", label: "Notified" },
+        { value: "active", label: "Active" }, { value: "new", label: "New" }, { value: "awaiting_ai", label: "AI pending" }, { value: "notified", label: "Alerted" },
         { value: "drafting", label: "Drafting" }, { value: "applied", label: "Applied" }, { value: "dismissed", label: "Dismissed" }, { value: "all", label: "All" },
-        { value: "off", label: "Not my field" },
+        { value: "off", label: "Off-field" },
       ]} />
       <Seg<DatePreset | "custom">
         scroll
         value={"preset" in when ? when.preset : "custom"}
         onChange={(v) => { haptic.select(); if (v === "custom") setCalendarOpen(true); else { setNow(Date.now()); setWhen({ preset: v }); } }}
-        options={[...DATE_PRESETS.map((p) => ({ value: p.value, label: p.label })), { value: "custom", label: "preset" in when ? "Pick dates…" : dateLabel(when) }]}
+        options={[...DATE_PRESETS.map((p) => ({ value: p.value, label: p.label })), { value: "custom", label: "preset" in when ? "Dates…" : dateLabel(when) }]}
       />
-      <Card style={{ paddingVertical: 10 }}>
-        <RangeSlider label="Score" value={score} onChange={setScore} onSlidingStart={() => setSliding(true)} onSlidingEnd={() => setSliding(false)} />
-      </Card>
-      {(feeds.data?.length ?? 0) > 1 ? (
-        <Seg scroll value={feed} onChange={(v) => { haptic.select(); setFeed(v); }} options={[{ value: "all", label: "All feeds" }, ...(feeds.data ?? []).map((f) => ({ value: String(f.id), label: f.name }))]} />
+      {filtersOpen ? (
+        <Card style={{ paddingVertical: 10, gap: 10 }}>
+          <RangeSlider label="Score" value={score} onChange={setScore} onSlidingStart={() => setSliding(true)} onSlidingEnd={() => setSliding(false)} />
+          {(feeds.data?.length ?? 0) > 1 ? (
+            <Seg scroll value={feed} onChange={(v) => { haptic.select(); setFeed(v); }} options={[{ value: "all", label: "All feeds" }, ...(feeds.data ?? []).map((f) => ({ value: String(f.id), label: f.name.split(/[:,]/)[0] }))]} />
+          ) : null}
+        </Card>
       ) : null}
-      {/* Repeats the active filters: a picked date range sits off-screen at the end of the scrolling chip row. */}
       <T faint size={12}>
-        {list.length} job{list.length === 1 ? "" : "s"} · {"preset" in when ? (when.preset === "all" ? "any date" : `last ${dateLabel(when)}`) : `posted ${dateLabel(when)}`}
-        {score[0] > 0 || score[1] < 100 ? ` · score ${score[0]}–${score[1]}` : ""}
+        {list.length} · {"preset" in when ? (when.preset === "all" ? "any date" : dateLabel(when)) : dateLabel(when)}
+        {score[0] > 0 || score[1] < 100 ? ` · ${score[0]}–${score[1]}` : ""} · swipe ← to dismiss
       </T>
     </View>
   );
@@ -123,7 +135,7 @@ export default function Jobs() {
       keyExtractor={(j) => j.id}
       itemLayoutAnimation={ROW_CLOSE}
       ListHeaderComponent={header}
-      ListEmptyComponent={jobs.loading ? <T muted>Loading…</T> : <Empty title="No jobs match">Change the filters or pull to refresh.</Empty>}
+      ListEmptyComponent={jobs.loading ? <T muted>Loading…</T> : <Empty title="No jobs">Change filters or pull to refresh</Empty>}
       refreshControl={<RefreshControl refreshing={jobs.refreshing} onRefresh={() => { setNow(Date.now()); jobs.refresh(); feeds.refresh(); }} tintColor={c.muted} />}
       renderItem={({ item }) => (
         <ReanimatedSwipeable

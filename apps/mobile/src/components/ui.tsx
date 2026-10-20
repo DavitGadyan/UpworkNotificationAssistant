@@ -204,6 +204,65 @@ export function Stat({ label, value, sub, tone, icon, onPress }: { label: string
   return onPress ? <PressableScale onPress={onPress} outerStyle={{ flex: 1 }} style={{ flex: 1 }} accessibilityLabel={label}>{body}</PressableScale> : <View style={{ flex: 1 }}>{body}</View>;
 }
 
+/* ---------- compact data (David, 2026-10-20: "less text, more data, icons, short titles") ---------- */
+
+/** Small number tile: icon + short label on top, big number, optional one-word sub. Use 2-4 per row. */
+export function Tile({ label, value, sub, tone, icon, onPress }: { label: string; value: ReactNode; sub?: string; tone?: Tone; icon?: ReactNode; onPress?: () => void }) {
+  const { c } = useTheme();
+  const body = (
+    <View style={{ flex: 1, minHeight: 76, padding: 12, borderRadius: radius.control + 2, backgroundColor: c.surface, borderColor: c.line, borderWidth: StyleSheet.hairlineWidth * 2, gap: 2 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+        {icon}
+        <Text style={{ fontFamily: font.medium, fontSize: 12, color: c.muted, flexShrink: 1 }} numberOfLines={1}>{label}</Text>
+      </View>
+      <Text style={{ fontFamily: font.display, fontSize: 24, color: tone ? toneColors(c, tone).fg : c.ink, fontVariant: ["tabular-nums"] }} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
+      {sub ? <Text style={{ fontFamily: font.body, fontSize: 11, color: c.faint }} numberOfLines={1}>{sub}</Text> : null}
+    </View>
+  );
+  return onPress ? <PressableScale onPress={onPress} outerStyle={{ flex: 1 }} style={{ flex: 1 }} accessibilityLabel={label}>{body}</PressableScale> : <View style={{ flex: 1 }}>{body}</View>;
+}
+
+/** used / cap with a thin bar; turns warn at 80 %, bad at 100 %. */
+export function Meter({ label, used, cap, icon, format = (n) => n.toLocaleString("en-US") }: { label: string; used: number; cap: number; icon?: ReactNode; format?: (n: number) => string }) {
+  const { c } = useTheme();
+  const pct = cap > 0 ? Math.min(1, used / cap) : 0;
+  const col = pct >= 1 ? c.bad : pct >= 0.8 ? c.warn : c.good;
+  return (
+    <View style={{ gap: 5, paddingVertical: 6 }} accessibilityLabel={`${label} ${format(used)} of ${format(cap)}`}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        {icon}
+        <Text style={{ flex: 1, fontFamily: font.medium, fontSize: 13, color: c.muted }} numberOfLines={1}>{label}</Text>
+        <Text style={{ fontFamily: font.semibold, fontSize: 13, color: c.ink, fontVariant: ["tabular-nums"] }}>{format(used)}<Text style={{ color: c.faint }}> / {format(cap)}</Text></Text>
+      </View>
+      <View style={{ height: 5, borderRadius: 3, backgroundColor: c.track, overflow: "hidden" }}>
+        <View style={{ width: `${Math.round(pct * 100)}%`, height: 5, borderRadius: 3, backgroundColor: col }} />
+      </View>
+    </View>
+  );
+}
+
+/** One-line list row: icon, title (+ faint meta), right-hand value or pill. */
+export function ListRow({ icon, title, meta, right, onPress, first }: { icon?: ReactNode; title: string; meta?: string; right?: ReactNode; onPress?: () => void; first?: boolean }) {
+  const { c } = useTheme();
+  const row = (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 44, paddingVertical: 6, borderTopWidth: first ? 0 : StyleSheet.hairlineWidth * 2, borderTopColor: c.line }}>
+      {icon}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={{ fontFamily: font.medium, fontSize: 14, color: c.ink }} numberOfLines={1}>{title}</Text>
+        {meta ? <Text style={{ fontFamily: font.body, fontSize: 12, color: c.faint }} numberOfLines={1}>{meta}</Text> : null}
+      </View>
+      {right}
+    </View>
+  );
+  return onPress ? <PressableScale onPress={onPress} accessibilityLabel={title}>{row}</PressableScale> : row;
+}
+
+/** Small colored dot for status at a glance. */
+export function Dot({ tone = "neutral", size = 8 }: { tone?: Tone; size?: number }) {
+  const { c } = useTheme();
+  return <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: toneColors(c, tone).fg }} />;
+}
+
 /* ---------- form ---------- */
 export function Field({ label, hint, error, style, ...input }: TextInputProps & { label: string; hint?: string; error?: string | null }) {
   const { c } = useTheme();

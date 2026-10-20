@@ -29,11 +29,11 @@ export default function Proposals() {
     && (!term || [p.jobTitle, p.coverLetter, p.research?.contactName, p.research?.company].filter(Boolean).join(" ").toLowerCase().includes(term)));
 
   return (
-    <Screen title="Proposals" subtitle="Nothing is sent to Upwork until you submit here." onRefresh={q.refresh} refreshing={q.refreshing}>
+    <Screen title="Proposals" onRefresh={q.refresh} refreshing={q.refreshing}>
       <NoAccessBanner show={noAccess} />
       {q.error ? <Banner tone="bad" title="Could not load proposals">{q.error}</Banner> : null}
       <View style={{ marginBottom: 12, gap: 10 }}>
-        <SearchField value={search} onChangeText={setSearch} placeholder="Search job, draft text or client" />
+        <SearchField value={search} onChangeText={setSearch} placeholder="Search" />
         <Seg value={group} onChange={(v) => { haptic.select(); setGroup(v); }} options={[
           { value: "todo", label: "To do" }, { value: "submitted", label: "Sent" }, { value: "discarded", label: "Discarded" }, { value: "all", label: "All" },
         ]} />
@@ -45,7 +45,7 @@ export default function Proposals() {
           return (
             <PressableScale key={p.id} onPress={() => router.push({ pathname: "/proposal/[id]", params: { id: String(p.id) } })} accessibilityLabel={p.jobTitle}>
               <Card style={{ gap: 10 }}>
-                <T weight="semibold" numberOfLines={2}>{p.jobTitle}</T>
+                <T weight="semibold" numberOfLines={1}>{p.jobTitle}</T>
                 <Row style={{ justifyContent: "space-between" }}>
                   <Row gap={6}><Pill label={st.label} tone={st.tone} /><T faint size={12}>{timeAgo(p.updatedAt)}</T></Row>
                   <T weight="semibold" style={{ fontVariant: ["tabular-nums"] }}>{money(p.bid)}</T>
@@ -59,7 +59,7 @@ export default function Proposals() {
             </PressableScale>
           );
         })}
-        {!q.loading && !list.length ? <Empty title="Nothing here">Generate a draft from any job’s detail screen, or turn on auto-draft in Settings.</Empty> : null}
+        {!q.loading && !list.length ? <Empty title="Nothing here">Draft from a job, or turn on auto-draft</Empty> : null}
       </View>
     </Screen>
   );

@@ -1,12 +1,12 @@
 import * as Clipboard from "expo-clipboard";
 import { useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Platform, ScrollView, View } from "react-native";
+import { Alert, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeInDown, useReducedMotion } from "react-native-reanimated";
 import { FeedbackButtons } from "../../components/job";
 import { IconCheck, IconCopy } from "../../components/icons";
-import { Banner, Bullets, Button, Card, Field, Pill, PressableScale, ProgressBar, Row, Screen, Seg, SectionTitle, T } from "../../components/ui";
+import { Banner, Button, Card, Dot, Field, Pill, PressableScale, ProgressBar, Row, Screen, Seg, T } from "../../components/ui";
 import { endpoints } from "../../lib/api";
 import { timeAgo } from "../../lib/format";
 import { haptic } from "../../lib/haptics";
@@ -25,6 +25,8 @@ function Reveal({ i, children }: { i: number; children: ReactNode }) {
   const entering = useMemo(() => (reduced ? undefined : FadeInDown.duration(250).delay(i * 50)), [i, reduced]);
   return <Animated.View entering={entering} style={{ marginBottom: 12 }}>{children}</Animated.View>;
 }
+
+const showList = (title: string, items: string[]) => Alert.alert(title, items.map((x) => `• ${x}`).join("\n\n"));
 
 function CopyButton({ text }: { text: string }) {
   const [done, setDone] = useState(false);
@@ -95,46 +97,47 @@ export default function Closer() {
   const canAsk = source === "inbox" ? !!roomId : thread.trim().length > 20;
 
   return (
-    <Screen scrollRef={scrollRef} title="Closer" subtitle="Reply advice for a live conversation - stage, a draft reply, and what to watch for.">
+    <Screen scrollRef={scrollRef} title="Closer">
       <View style={{ marginBottom: 12 }}>
-        <Seg value={source} onChange={(v) => { haptic.select(); setSource(v); }} options={[{ value: "inbox", label: "Pick conversation" }, { value: "paste", label: "Paste thread" }]} />
+        <Seg value={source} onChange={(v) => { haptic.select(); setSource(v); }} options={[{ value: "inbox", label: "Inbox" }, { value: "paste", label: "Paste" }]} />
       </View>
 
       {source === "inbox" ? (
         <Card style={{ marginBottom: 12, gap: 8 }}>
           {!rooms ? <Button label="Load inbox" onPress={loadInbox} loading={loadingInbox} /> : null}
-          {inboxError ? <Banner tone="warn" title="Inbox unavailable">{inboxError}</Banner> : null}
+          {inboxError ? <Banner tone="warn" title="Inbox unavailable"><T size={13} numberOfLines={2} style={{ color: c.warn }}>{inboxError}</T></Banner> : null}
           {rooms?.map((r) => {
             const on = r.id === roomId;
             return (
               <PressableScale key={r.id} onPress={() => { haptic.select(); setRoomId(r.id); }} accessibilityLabel={r.name}>
-                <View style={{ padding: 12, borderRadius: 12, borderWidth: on ? 2 : 1, borderColor: on ? c.ink : c.line, backgroundColor: on ? c.sunken : c.surface, gap: 2 }}>
-                  <Row style={{ justifyContent: "space-between" }}>
-                    <T weight="semibold" numberOfLines={1} style={{ flex: 1 }}>{r.name}</T>
-                    {r.unread ? <Pill label="Unread" tone="info" /> : null}
+                <View style={{ paddingVertical: 8, paddingHorizontal: 10, borderRadius: 12, borderWidth: on ? 2 : 1, borderColor: on ? c.ink : c.line, backgroundColor: on ? c.sunken : c.surface, gap: 2 }}>
+                  <Row gap={6}>
+                    {r.awaiting === "freelancer" ? <Dot tone="warn" /> : null}
+                    <T weight="semibold" size={14} numberOfLines={1} style={{ flex: 1 }}>{r.name}</T>
+                    <T faint size={11}>{r.lastAt ? timeAgo(r.lastAt) : ""}</T>
+                    {r.unread ? <Pill label="New" tone="info" /> : null}
                   </Row>
-                  <T muted size={13} numberOfLines={2}>{r.lastMessage || "—"}</T>
-                  <T faint size={12}>{r.lastAt ? timeAgo(r.lastAt) : ""}{r.awaiting === "freelancer" ? " · waiting on you" : ""}</T>
+                  <T muted size={12} numberOfLines={1}>{r.lastMessage || "—"}</T>
                 </View>
               </PressableScale>
             );
           })}
-          {rooms && !rooms.length && !inboxError ? <T muted>No conversations.</T> : null}
-          {rooms ? <Button small variant="ghost" label="Reload inbox" onPress={loadInbox} loading={loadingInbox} /> : null}
+          {rooms && !rooms.length && !inboxError ? <T muted>No conversations</T> : null}
+          {rooms ? <Button small variant="ghost" label="Reload" onPress={loadInbox} loading={loadingInbox} /> : null}
         </Card>
       ) : (
-        <Field label="Conversation" value={thread} onChangeText={setThread} multiline placeholder={"Client: …\nYou: …"} />
+        <Field label="" value={thread} onChangeText={setThread} multiline placeholder={"Client: …\nYou: …"} />
       )}
 
       <Row gap={10}>
-        <Field label="Country" value={country} onChangeText={setCountry} placeholder="Auto from job" style={{ flex: 1 }} />
-        <Field label="Client name" value={clientName} onChangeText={setClientName} placeholder="Optional" style={{ flex: 1 }} />
+        <Field label="" accessibilityLabel="Country" value={country} onChangeText={setCountry} placeholder="Country (auto)" style={{ flex: 1 }} />
+        <Field label="" accessibilityLabel="Client name" value={clientName} onChangeText={setClientName} placeholder="Client name" style={{ flex: 1 }} />
       </Row>
-      <Field label="Your goal for this reply" value={goal} onChangeText={setGoal} placeholder="e.g. hold $6k, book a call" />
+      <Field label="" accessibilityLabel="Your goal for this reply" value={goal} onChangeText={setGoal} placeholder="Goal, e.g. hold $6k, book a call" />
 
-      {busy ? <View style={{ gap: 8, marginBottom: 12 }}><ProgressBar /><T muted size={13}>Reading the thread and drafting… usually 20–60 s.</T></View>
+      {busy ? <View style={{ gap: 8, marginBottom: 12 }}><ProgressBar /><T muted size={12}>Drafting… 20–60 s</T></View>
         : <Button label="Get advice" variant="dark" onPress={ask} disabled={!canAsk} />}
-      {error ? <View style={{ marginTop: 12 }}><Banner tone="bad" title="No advice">{error}</Banner></View> : null}
+      {error ? <View style={{ marginTop: 12 }}><Banner tone="bad" title="No advice"><T size={13} numberOfLines={3} style={{ color: c.bad }}>{error}</T></Banner></View> : null}
 
       {advice ? (
         // Bring the answer into view once it arrives (it lands below the form).
@@ -145,36 +148,34 @@ export default function Closer() {
         }}>
           <Reveal i={0}>
             <Card style={{ gap: 8 }}>
-              <Row style={{ justifyContent: "space-between" }}><T muted size={13} weight="medium">Stage</T><Pill label={STAGE[advice.stage]} tone="info" /></Row>
-              <T>{advice.clientRead}</T>
-              <T weight="semibold">{advice.recommendedMove}</T>
+              <Row style={{ justifyContent: "space-between" }}>
+                <T weight="semibold" size={14} numberOfLines={2} style={{ flex: 1 }}>{advice.recommendedMove}</T>
+                <Pill label={STAGE[advice.stage]} tone="info" />
+              </Row>
+              <PressableScale onPress={() => Alert.alert("Client read", advice.clientRead)} accessibilityLabel="Client read">
+                <T muted size={13} numberOfLines={2}>{advice.clientRead}</T>
+              </PressableScale>
             </Card>
           </Reveal>
           <Reveal i={1}>
             <Card style={{ gap: 10 }}>
-              <Row style={{ justifyContent: "space-between" }}><T weight="displaySemi" size={17}>Suggested reply</T><CopyButton text={advice.reply} /></Row>
+              <Row style={{ justifyContent: "space-between" }}><T weight="displaySemi" size={16}>Reply</T><CopyButton text={advice.reply} /></Row>
               <T selectable>{advice.reply}</T>
             </Card>
           </Reveal>
-          {advice.alternatives.length ? <Reveal i={2}><Card style={{ gap: 8 }}><SectionTitle>Alternatives</SectionTitle><Bullets items={advice.alternatives} /></Card></Reveal> : null}
-          {advice.culturalNotes.length ? (
-            <Reveal i={3}>
-              <Card style={{ gap: 8 }}>
-                <SectionTitle right={<Pill label="Hypotheses" tone="warn" />}>Cultural notes · {advice.country}</SectionTitle>
-                <Bullets items={advice.culturalNotes} />
-                <T faint size={12}>Generalisations, not facts about this client - check against how they actually write.</T>
-              </Card>
-            </Reveal>
-          ) : null}
-          {advice.risks.length ? <Reveal i={4}><Card style={{ gap: 8 }}><SectionTitle>Risks</SectionTitle><Bullets items={advice.risks} tone="bad" /></Card></Reveal> : null}
-          <Reveal i={5}>
+          <Reveal i={2}>
             <Card style={{ gap: 8 }}>
-              <SectionTitle>Next step</SectionTitle>
-              <T>{advice.nextStep}</T>
-              {advice.questionsToAsk.length ? <><T muted size={13} weight="medium">Questions to ask</T><Bullets items={advice.questionsToAsk} /></> : null}
+              <T muted size={12} weight="medium">Next step</T>
+              <T size={14}>{advice.nextStep}</T>
+              <Row wrap gap={6}>
+                {advice.questionsToAsk.length ? <PressableScale onPress={() => showList("Questions to ask", advice.questionsToAsk)} accessibilityLabel="Questions to ask"><Pill label={`? ${advice.questionsToAsk.length} questions`} tone="info" /></PressableScale> : null}
+                {advice.alternatives.length ? <PressableScale onPress={() => showList("Alternatives", advice.alternatives)} accessibilityLabel="Alternatives"><Pill label={`${advice.alternatives.length} alternatives`} /></PressableScale> : null}
+                {advice.risks.length ? <PressableScale onPress={() => showList("Risks", advice.risks)} accessibilityLabel="Risks"><Pill label={`⚠ ${advice.risks.length} risks`} tone="bad" /></PressableScale> : null}
+                {advice.culturalNotes.length ? <PressableScale onPress={() => showList(`Culture · ${advice.country} (hypotheses)`, advice.culturalNotes)} accessibilityLabel="Cultural notes"><Pill label={`Culture · ${advice.country}`} tone="warn" /></PressableScale> : null}
+              </Row>
             </Card>
           </Reveal>
-          <Reveal i={6}>
+          <Reveal i={3}>
             <Card><FeedbackButtons kind="closer" refId={String(advice.reportId ?? advice.createdAt)} label="Helpful advice?" data={{ stage: advice.stage, country: advice.country, roomId: advice.roomId, model: advice.model }} /></Card>
           </Reveal>
         </View>

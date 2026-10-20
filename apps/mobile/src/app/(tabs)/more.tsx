@@ -26,14 +26,14 @@ export default function More() {
   return (
     <Screen title="More">
       <Card style={{ marginBottom: 16 }}>
-        <Item icon={<IconEye size={20} color={c.ink} />} label="Watchlist" sub="Competition on jobs you were alerted to" href="/watchlist" />
+        <Item icon={<IconEye size={20} color={c.ink} />} label="Watchlist" sub="Bids on alerted jobs" href="/watchlist" />
         <Divider />
-        <Item icon={<IconChart size={20} color={c.ink} />} label="Insights" sub="Funnel, win rate and coaching reports" href="/insights" />
-        <Item icon={<IconFlask size={20} color={c.ink} cut={c.control} />} label="Prompt analytics" sub="Reply, offer and hire rate per prompt version" href="/prompts" />
+        <Item icon={<IconChart size={20} color={c.ink} />} label="Insights" sub="Funnel · wins · reviews" href="/insights" />
+        <Item icon={<IconFlask size={20} color={c.ink} cut={c.control} />} label="Prompts" sub="Reply rate per version" href="/prompts" />
         <Divider />
-        <Item icon={<IconFeed size={20} color={c.ink} />} label="Feeds" sub="What gets polled" href="/feeds" />
+        <Item icon={<IconFeed size={20} color={c.ink} />} label="Feeds" sub="Searches" href="/feeds" />
         <Divider />
-        <Item icon={<IconSettings size={20} color={c.ink} cut={c.control} />} label="Settings" sub="Alerts, thresholds, auto-draft, budget" href="/settings" />
+        <Item icon={<IconSettings size={20} color={c.ink} cut={c.control} />} label="Settings" sub="Alerts · limits · budget" href="/settings" />
       </Card>
       <Card style={{ gap: 12 }}>
         <Row gap={12}>
