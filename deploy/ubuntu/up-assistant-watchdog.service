@@ -1,0 +1,8 @@
+[Unit]
+Description=Up Assistant watchdog (restarts the dashboard or worker when the Supabase connection or heartbeat dies)
+After=up-assistant-web.service up-assistant-worker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/dyada/Desktop/UpworkNotificationAssistant
+ExecStart=/home/dyada/Desktop/UpworkNotificationAssistant/deploy/ubuntu/watchdog.sh

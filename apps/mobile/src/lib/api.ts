@@ -3,6 +3,7 @@ import * as demo from "../demo";
 import type { CloserAdvice, CloserInboxResponse, HealthFull, HealthSummary, Proposal, UsageReport } from "../types";
 import { config } from "./config";
 import { demoEmit } from "./data";
+import type { PortfolioChoices } from "./portfolio";
 import { supabase } from "./supabase";
 
 /*
@@ -107,11 +108,16 @@ export const endpoints = {
   },
   draft: (jobId: string, body: { guidance?: string; webSearch?: boolean }) =>
     api<Proposal>(`/api/jobs/${encodeURIComponent(jobId)}/draft`, { method: "POST", body, timeoutMs: 300_000 }),
-  editProposal: (id: number, body: { coverLetter: string; answers: { question: string; answer: string }[]; bid: number | null; estimatedDuration?: string }) =>
+  editProposal: (id: number, body: { coverLetter: string; answers: { question: string; answer: string }[]; bid: number | null; estimatedDuration?: string; portfolioProjectIds?: string[] }) =>
     api<Proposal>(`/api/proposals/${id}`, { method: "PATCH", body }),
+  /** Attachable Upwork portfolio items + portfolio-site projects for a job. refresh re-reads Upwork (one guarded call). */
+  portfolio: (jobId: string, refresh = false) =>
+    api<PortfolioChoices>(`/api/portfolio?jobId=${encodeURIComponent(jobId)}${refresh ? "&refresh=1" : ""}`, { timeoutMs: refresh ? 120_000 : 60_000 }),
   loom: (id: number, url: string) => api<Proposal>(`/api/proposals/${id}/loom`, { method: "POST", body: { url } }),
   approve: (id: number) => api<Proposal>(`/api/proposals/${id}/approve`, { method: "POST", body: {} }),
   preview: (id: number) => api<Proposal>(`/api/proposals/${id}/preview`, { method: "POST", body: {}, timeoutMs: 120_000 }),
+  /** Optional Connects boost bid: rebuilds the Upwork preview with it (null takes it off). Nothing is sent until submit. */
+  boost: (id: number, connects: number | null) => api<Proposal>(`/api/proposals/${id}/boost`, { method: "POST", body: { connects }, timeoutMs: 120_000 }),
   submit: (id: number) => api<Proposal>(`/api/proposals/${id}/submit`, { method: "POST", body: { confirm: "SUBMIT" }, timeoutMs: 120_000 }),
   discard: (id: number) => api<Proposal>(`/api/proposals/${id}/discard`, { method: "POST", body: {} }),
   /** Copy-and-paste route: David sent it on Upwork himself. Records it only - no Upwork call. */
@@ -134,11 +140,12 @@ async function demoApi<T>(path: string, method: string, body: unknown): Promise<
   if (path.startsWith("/api/health")) return demo.demoHealth as T;
   if (path.startsWith("/api/closer") && method === "GET") return demo.demoInbox as T;
   if (path.startsWith("/api/closer")) return demo.demoAdvice as T;
+  if (path.startsWith("/api/portfolio")) return demo.demoPortfolio as T;
   const m = path.match(/^\/api\/proposals\/(\d+)(?:\/(\w+))?/);
   if (m) {
     const p = demo.demoProposals.find((x) => x.id === Number(m[1]));
     if (!p) throw new ApiError("Proposal not found", 404);
-    const next = { loom: "ready", approve: "approved", preview: "previewed", submit: "submitted", applied: "submitted", discard: "discarded" } as const;
+    const next = { loom: "ready", approve: "approved", preview: "previewed", boost: "previewed", submit: "submitted", applied: "submitted", discard: "discarded" } as const;
     if (m[2] === "rewrite") {
       await sleep(1500);
       p.data = { ...p.data, coverLetter: p.data.coverLetter.slice(0, 900) };
@@ -147,6 +154,7 @@ async function demoApi<T>(path: string, method: string, body: unknown): Promise<
     }
     const action = m[2] as keyof typeof next | undefined;
     if (action) p.status = next[action];
+    if (action === "boost") p.data = { ...p.data, preview: { ...(p.data.preview ?? {}), boostConnects: (body as { connects: number | null }).connects } };
     if (action === "loom") p.data = { ...p.data, loomUrl: (body as { url: string }).url, coverLetter: p.data.coverLetter.replace("{{LOOM_URL}}", (body as { url: string }).url) };
     if (!action && body) p.data = { ...p.data, ...(body as object) };
     demoEmit();

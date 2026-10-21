@@ -65,7 +65,14 @@ function fromPostgres(url: string): Db {
         reject(new Error(`query timed out after ${timeoutMs / 1000} s: ${text.slice(0, 60)}`));
       }, timeoutMs);
     });
-    try { return (await Promise.race([q, timeout])) as unknown as T[]; } finally { clearTimeout(timer); }
+    try {
+      return (await Promise.race([q, timeout])) as unknown as T[];
+    } catch (e) {
+      // The pooler dropped the socket (2026-10-20: "write CONNECTION_DESTROYED" left the dashboard on an error page
+      // for an hour). Those connections never come back by themselves, so retire the pool like a timeout.
+      if (isConnectionDrop(e)) retire();
+      throw e;
+    } finally { clearTimeout(timer); }
   };
   db = {
     query: run(sql),
@@ -107,13 +114,18 @@ export async function getDb(): Promise<Db> {
   return opening;
 }
 
-/** Reads are safe to repeat: one that hung (and retired the pool) is retried once on fresh connections. */
+/** A dead socket, not a bad query: postgres.js connection errors and the OS-level resets underneath them. */
+const isConnectionDrop = (e: unknown) =>
+  /CONNECTION_DESTROYED|CONNECTION_CLOSED|CONNECTION_ENDED|CONNECT_TIMEOUT|ECONNRESET|ECONNREFUSED|EPIPE|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up/i
+    .test(`${(e as { code?: string })?.code ?? ""} ${(e as Error)?.message ?? ""}`);
+
+/** Reads are safe to repeat: one that hung or lost its socket (and retired the pool) is retried once on fresh connections. */
 const isRead = (text: string) => /^\s*(select|with)\b/i.test(text) && !/\b(insert|update|delete)\b/i.test(text);
 export async function query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]> {
   try {
     return await (await getDb()).query<T>(text, params);
   } catch (e) {
-    if (!isRead(text) || !/query timed out/.test((e as Error).message)) throw e;
+    if (!isRead(text) || !(/query timed out/.test((e as Error).message) || isConnectionDrop(e))) throw e;
     return (await getDb()).query<T>(text, params);
   }
 }

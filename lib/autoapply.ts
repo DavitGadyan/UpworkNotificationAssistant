@@ -50,6 +50,7 @@ export const vouched = (j: Pick<CachedJob, "score">, minFit: number) => (j.score
 /** Does this job clear every auto-apply bar? Returns the first reason it doesn't, or null. */
 export function autoApplyBlocker(j: CachedJob, a: AA, nowMs = Date.now(), ghostClients: Set<string> = new Set()): string | null {
   if (j.score.excluded) return "excluded";
+  if (j.score.rules?.flags.some((f) => f.code === "malware_lure")) return "possible fake-job malware lure";
   if (["dismissed", "applied"].includes(j.status)) return `status ${j.status}`;
   const v = vouched(j, a.minFit);
   if (!v && j.score.total < a.minRank) return `rank ${j.score.total} < ${a.minRank}`;

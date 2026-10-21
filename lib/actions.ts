@@ -11,7 +11,8 @@ import { buildLessons, decideLessons } from "./learning/lessons";
 import { syncProposalOutcomes } from "./learning/outcomes";
 import { saveLabReport, updateLabConfig } from "./learning/promptLab";
 import { query } from "./pg";
-import { approve, attachLoom, discard, editDraft, markApplied, preview, submit } from "./proposals/submit";
+import { portfolioChoices } from "./proposals/portfolio";
+import { approve, attachLoom, discard, editDraft, markApplied, preview, setBoost, submit } from "./proposals/submit";
 import { fetchViaClaude } from "./upwork/claudeFetch";
 import { usageReport } from "./usage";
 
@@ -53,14 +54,19 @@ export async function dispatch(path: string, method: string, body: Body = {}): P
       patch.bid = bid;
     }
     if (typeof body.estimatedDuration === "string") patch.estimatedDuration = body.estimatedDuration;
+    if (Array.isArray(body.portfolioProjectIds)) patch.portfolioProjectIds = body.portfolioProjectIds.map(String);
     return editDraft(Number(m[1]), patch);
   }
-  if ((m = p.match(/^\/api\/proposals\/(\d+)\/(loom|approve|preview|submit|discard|rewrite|applied)$/)) && method === "POST") {
+  if (p === "/api/portfolio" && method === "GET") {
+    return portfolioChoices(url.searchParams.get("jobId"), { refresh: url.searchParams.get("refresh") === "1" });
+  }
+  if ((m = p.match(/^\/api\/proposals\/(\d+)\/(loom|approve|preview|boost|submit|discard|rewrite|applied)$/)) && method === "POST") {
     const id = Number(m[1]);
     switch (m[2]) {
       case "loom": return attachLoom(id, String(body.url ?? ""));
       case "approve": return approve(id);
       case "preview": return preview(id);
+      case "boost": return setBoost(id, body.connects == null || body.connects === "" ? null : Number(body.connects));
       case "submit": return submit(id, String(body.confirm ?? "")); // still requires the literal "SUBMIT"
       case "discard": return discard(id);
       case "rewrite": return rewriteProposal(id);

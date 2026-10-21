@@ -2,6 +2,7 @@
  * Demo fixtures, served instead of Supabase and the backend API when EXPO_PUBLIC_DEMO=1.
  * Used for screenshots and UI work without the owner account. Shapes match the real rows exactly.
  */
+import type { PortfolioChoices } from "./lib/portfolio";
 import type {
   Calibration, CloserAdvice, CloserInboxResponse, CoachReport, FeedRow, HealthSummary, Icp, Job, JobEnrichment, JobRow,
   MonthMetrics, MonthlyReview, NotificationDbRow, ProposalRow, ReportRow, ScoreBreakdown, Settings, SnapshotRow, UsageReport, WatchRow,
@@ -144,7 +145,11 @@ export const demoProposals: ProposalRow[] = [
     data: {
       jobTitle: demoJobs[5].title, jobUrl: demoJobs[5].url, coverLetter: letter.replace("{{LOOM_URL}}", "https://www.loom.com/share/abc123"), research,
       answers: [], bid: 4500, estimatedDuration: null, portfolioProjectIds: [], loomUrl: "https://www.loom.com/share/abc123", approvedAt: iso(now - 5.5 * H),
-      preview: { upwork: { preview_id: "pv_77", connects_cost: 14, connects_balance: 142, boost: "none", unmet_preferred_qualifications: [] }, type: "proposal" },
+      preview: {
+        upwork: { preview_id: "pv_77", connects_cost: 14, connects_balance: 142, boost: { available: true, recommended_connects: 3, max_boost_connects: 128, current_top_bids: [2], note: "4 paid slots on this job" }, unmet_preferred_qualifications: [] },
+        type: "proposal", invitationId: null, boostConnects: null,
+        boost: { available: true, reason: null, skip: false, recommended: 3, max: 128, topBids: [2], note: "4 paid slots on this job" },
+      },
       previewId: "pv_77", submittedAt: null, originalDraft: letter, model: "claude-opus", promptVersion: 3,
     },
   },
@@ -253,4 +258,15 @@ export const demoAdvice: CloserAdvice = {
   nextStep: "Send the reply, then propose a 20-min call to lock the milestone plan.",
   questionsToAsk: ["Who signs off on go-live?"],
   model: "claude-opus", country: "United States", roomId: "room_1", createdAt: iso(now), reportId: 99,
+};
+
+export const demoPortfolio: PortfolioChoices = {
+  upwork: { items: [{ id: "pp_demo1", title: "RAG assistant for a legal team" }], checkedAt: new Date(Date.now() - 3 * 36e5).toISOString(), canRefresh: true },
+  site: {
+    relevant: ["project-38"],
+    projects: [
+      { id: "project-38", title: "AI Marketing — Tracking, SEO & GEO/AEO", url: "https://davitgadyan.github.io/portfolio_app/portfolio/project-38/", summary: "Rebuilt the missing measurement layer so every enquiry traces back to the ad click that paid for it.", date: "2026-08-29" },
+      { id: "project-36", title: "Generative AI: Video Ads", url: "https://davitgadyan.github.io/portfolio_app/portfolio/project-36/", summary: "Generated video ads end to end with a review loop.", date: "2026-08-20" },
+    ],
+  },
 };

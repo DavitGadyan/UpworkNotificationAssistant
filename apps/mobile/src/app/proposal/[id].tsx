@@ -12,6 +12,7 @@ import { applyUrl, DURATIONS, findPlaceholders, letterForUpwork } from "../../li
 import { fetchJob, fetchProposal, useQuery } from "../../lib/data";
 import { CONTACT_ROLE_LABELS, COVER_MAX, LOOM_PLACEHOLDER, LOOM_RE, money, timeAgo } from "../../lib/format";
 import { haptic } from "../../lib/haptics";
+import { addProjectLink, hasProjectLink, removeProjectLink, type SiteProject } from "../../lib/portfolio";
 import { nextStep, PROPOSAL_STATUS, STEPS, stepIndex } from "../../lib/status";
 import { font, motion, radius, useTheme } from "../../theme";
 import type { Proposal } from "../../types";
@@ -52,6 +53,45 @@ function Stepper({ idx }: { idx: number }) {
         );
       })}
     </Row>
+  );
+}
+
+/** Upwork's boost block, as the server stores it with the preview (lib/proposals/submit.ts boostInfo). */
+type BoostInfo = { available: boolean; reason: string | null; skip: boolean; recommended: number | null; max: number | null; topBids: number[] | null; note: string | null };
+
+/**
+ * Optional Connects boost for a top slot on the client's list. Shows Upwork's minimum, maximum and the competing bids;
+ * setting or removing a boost rebuilds the Upwork preview, so the SUBMIT tap confirms exactly what is shown.
+ */
+function BoostCard({ p, busy, onSet }: { p: Proposal; busy: boolean; onSet: (connects: number | null) => void }) {
+  const b = (p.preview?.boost ?? null) as BoostInfo | null;
+  const current = (p.preview?.boostConnects as number | null | undefined) ?? null;
+  const [amount, setAmount] = useState(current != null ? String(current) : b?.recommended != null ? String(b.recommended) : "");
+  const n = Number(amount);
+  const min = Math.max(1, b?.recommended ?? 1);
+  const valid = amount.trim() !== "" && Number.isInteger(n) && n >= min && (b?.max == null || n <= b.max);
+  return (
+    <Card style={{ marginBottom: 12, gap: 10 }}>
+      <CardHead title="Boost" right={current != null ? <Pill label={`${current} Connects`} tone="info" /> : <T faint size={12}>optional</T>} />
+      {!b ? <T muted size={13}>{"Upwork's preview has no boost details for this job."}</T>
+        : !b.available ? <T muted size={13}>{`Boosting isn't available on this job${b.reason ? `: ${b.reason}` : ""}.`}</T>
+        : (
+          <>
+            {b.skip ? <T size={13} style={{ fontWeight: "600" }}>Upwork advises against boosting this one.</T> : null}
+            <T muted size={13}>
+              {`${b.topBids == null ? "Current bids unknown." : b.topBids.length ? `Current top bids: ${b.topBids.join(", ")} Connects.` : "No one has boosted yet."}${b.recommended != null ? ` Minimum for a top slot: ${b.recommended}.` : ""}${b.max != null ? ` Most you can bid: ${b.max}.` : ""}`}
+            </T>
+            {b.note ? <T faint size={12}>{b.note}</T> : null}
+            <Field label="Connects to bid" value={amount} onChangeText={(t) => setAmount(t.replace(/[^0-9]/g, ""))} keyboardType="number-pad"
+              error={amount.trim() && !valid ? `Between ${min} and ${b.max ?? "your balance"}` : null} style={{ marginBottom: 0 }} />
+            <Row gap={8}>
+              <Button small variant="dark" label={current != null ? "Change boost" : "Boost"} disabled={busy || !valid || n === current} loading={busy} onPress={() => onSet(n)} />
+              {current != null ? <Button small variant="ghost" label="Remove" disabled={busy} onPress={() => onSet(null)} /> : null}
+            </Row>
+            <T faint size={12}>Rebuilds the Upwork preview. Upwork charges it only if you land in a paid slot. Nothing is sent until you submit.</T>
+          </>
+        )}
+    </Card>
   );
 }
 
@@ -117,7 +157,7 @@ function LetterView({ text, loom }: { text: string; loom: string | null }) {
             </Row>
           );
         }
-        const head = line.match(/^(DELIVERABLES|BUDGET)\s*:\s*(.*)$/i);
+        const head = line.match(/^(DELIVERABLES|BUDGET|Similar work)\s*:\s*(.*)$/i);
         if (head) {
           return (
             <View key={i} style={{ marginTop: 4, gap: 2 }}>
@@ -195,8 +235,115 @@ function NoteWarning({ text }: { text: string }) {
   return <T size={12} style={{ color: c.bad }}>Remove before sending: {hits.map((h) => `"${h.length > 60 ? `${h.slice(0, 57)}…` : h}"`).join(", ")}</T>;
 }
 
+/** A tick box row (44pt+ tall) for one Upwork portfolio item. */
+function CheckRow({ label, checked, onPress, disabled, tone }: { label: string; checked: boolean; onPress: () => void; disabled?: boolean; tone?: "warn" }) {
+  const { c } = useTheme();
+  return (
+    <PressableScale onPress={onPress} disabled={disabled} accessibilityLabel={label}>
+      <Row gap={12} style={{ minHeight: 48, paddingVertical: 6 }}>
+        <View accessibilityRole="checkbox" accessibilityState={{ checked, disabled }} style={{
+          width: 22, height: 22, borderRadius: 6, alignItems: "center", justifyContent: "center",
+          borderWidth: 2, borderColor: checked ? c.ink : c.line, backgroundColor: checked ? c.ink : c.surface,
+        }}>
+          {checked ? <IconCheck size={13} color={c.surface} /> : null}
+        </View>
+        <T size={14} style={{ flex: 1, color: tone === "warn" ? c.warn : c.ink }}>{label}</T>
+      </Row>
+    </PressableScale>
+  );
+}
+
+/**
+ * Portfolio for this proposal. Upwork portfolio items are real attachments (saved with the draft, sent with the
+ * Upwork preview). Portfolio-site projects can't be attached by Upwork, so "Add" puts a "Similar work:" line with
+ * the link into the letter - visible in the letter above, and saved like any other edit.
+ */
+function PortfolioCard({ jobId, ids, setIds, letter, setLetter, locked }: {
+  jobId: string; ids: string[]; setIds: (v: string[]) => void; letter: string; setLetter: (v: string) => void; locked: boolean;
+}) {
+  const { c } = useTheme();
+  const pq = useQuery(`portfolio:${jobId}`, () => endpoints.portfolio(jobId));
+  const [showAll, setShowAll] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const data = pq.data;
+  const items = data?.upwork.items ?? [];
+  const unknown = ids.filter((id) => !items.some((i) => i.id === id));
+  const projects = data?.site.projects ?? [];
+  const relevant = (data?.site.relevant ?? []).map((id) => projects.find((p) => p.id === id)).filter((p): p is SiteProject => !!p);
+  const f = filter.trim().toLowerCase();
+  const others = projects.filter((p) => !relevant.includes(p) && (!f || `${p.title} ${p.summary}`.toLowerCase().includes(f)));
+  const inLetter = projects.filter((p) => hasProjectLink(letter, p.url)).length;
+  const toggle = (id: string) => { haptic.select(); setIds(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]); };
+
+  async function refresh() {
+    setRefreshing(true); setRefreshError(null);
+    try { pq.setData(await endpoints.portfolio(jobId, true)); haptic.light(); } catch (e) { haptic.error(); setRefreshError((e as Error).message); } finally { setRefreshing(false); }
+  }
+
+  const projectRow = (pr: SiteProject, best: boolean) => {
+    const added = hasProjectLink(letter, pr.url);
+    return (
+      <View key={pr.id} style={{ gap: 6, paddingVertical: 10, borderTopWidth: 1, borderTopColor: c.line }}>
+        <Row gap={6} wrap>
+          <T weight="medium" size={14} style={{ flexShrink: 1 }}>{pr.title}</T>
+          {best ? <Pill label="Matches this job" tone="info" /> : null}
+        </Row>
+        <T muted size={12} numberOfLines={2}>{pr.summary}</T>
+        <Row gap={6}>
+          <TextButton label="Open" icon={(col) => <IconExternal size={14} color={col} />} onPress={() => openUpwork(pr.url)} />
+          {!locked ? (
+            <TextButton label={added ? "In letter · remove" : "Add to letter"} icon={added ? (col) => <IconCheck size={14} color={col} /> : (col) => <IconLink size={14} color={col} />}
+              onPress={() => { haptic.select(); setLetter(added ? removeProjectLink(letter, pr.url) : addProjectLink(letter, pr)); }} />
+          ) : null}
+        </Row>
+      </View>
+    );
+  };
+
+  return (
+    <Card style={{ marginBottom: 12, gap: 10 }}>
+      <CardHead title="Portfolio" right={data?.upwork.canRefresh ? (
+        <TextButton label={refreshing ? "Refreshing…" : "Refresh"} icon={(col) => <IconRefresh size={14} color={col} />} onPress={() => { if (!refreshing) void refresh(); }} />
+      ) : undefined} />
+      {pq.loading && !data ? <T muted size={13}>Loading your portfolio…</T> : null}
+      {pq.error && !data ? <T size={13} style={{ color: c.bad }}>{pq.error}</T> : null}
+      {data ? (
+        <>
+          <View style={{ gap: 2 }}>
+            <T muted size={13} weight="medium">Upwork portfolio items · attached to the proposal</T>
+            {items.map((it) => <CheckRow key={it.id} label={it.title} checked={ids.includes(it.id)} disabled={locked} onPress={() => toggle(it.id)} />)}
+            {unknown.map((id) => <CheckRow key={id} label={`Item ${id} - no longer on your Upwork profile; untick to remove`} checked disabled={locked} tone="warn" onPress={() => toggle(id)} />)}
+            {!items.length && !unknown.length ? (
+              <T muted size={13}>
+                {`Your Upwork profile has no portfolio items Upwork can attach${data.upwork.checkedAt ? ` (checked ${timeAgo(data.upwork.checkedAt)})` : ""}. Add them on Upwork under Profile → Portfolio, then tap Refresh. Until then, add project links below.`}
+              </T>
+            ) : null}
+            {ids.length ? <T faint size={12}>{ids.length} attached. Changing them after approval asks for a fresh approval.</T> : null}
+            {refreshError ? <T size={12} style={{ color: c.bad }}>{refreshError}</T> : null}
+          </View>
+          <View style={{ gap: 2, marginTop: 4 }}>
+            <T muted size={13} weight="medium">{`Portfolio-site projects · added to the letter as a link${inLetter ? ` · ${inLetter} in the letter` : ""}`}</T>
+            {relevant.map((pr) => projectRow(pr, true))}
+            {showAll || !relevant.length ? (
+              <>
+                <Field label="" value={filter} onChangeText={setFilter} placeholder="Filter by title or topic" autoCorrect={false} style={{ marginTop: 8, marginBottom: 0 }} />
+                {others.map((pr) => projectRow(pr, false))}
+                {!others.length ? <T faint size={12}>No project matches that filter.</T> : null}
+              </>
+            ) : (
+              <TextButton label={`Show all projects (${projects.length - relevant.length} more)`} onPress={() => { haptic.select(); setShowAll(true); }} />
+            )}
+          </View>
+        </>
+      ) : null}
+    </Card>
+  );
+}
+
 const CACHE = (id: number) => `proposal-draft:${id}`;
-type Cached = { letter: string; answers: { question: string; answer: string }[]; bid: string; duration: string; savedAt: number };
+type Cached = { letter: string; answers: { question: string; answer: string }[]; bid: string; duration: string; portfolioIds?: string[]; savedAt: number };
 const AUTOSAVE_MS = 3000;
 
 export default function ProposalEditor() {
@@ -211,6 +358,7 @@ export default function ProposalEditor() {
   const [answers, setAnswers] = useState<{ question: string; answer: string }[]>([]);
   const [bid, setBid] = useState("");
   const [duration, setDuration] = useState("");
+  const [portfolioIds, setPortfolioIds] = useState<string[]>([]);
   const [loom, setLoom] = useState("");
   const [loomOpen, setLoomOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -225,7 +373,8 @@ export default function ProposalEditor() {
   const saveSeq = useRef(0);
   const cacheChecked = useRef(false);
 
-  const dirty = !!p && (letter !== p.coverLetter || bid !== (p.bid == null ? "" : String(p.bid)) || duration !== (p.estimatedDuration ?? "") || JSON.stringify(answers) !== JSON.stringify(p.answers));
+  const dirty = !!p && (letter !== p.coverLetter || bid !== (p.bid == null ? "" : String(p.bid)) || duration !== (p.estimatedDuration ?? "") || JSON.stringify(answers) !== JSON.stringify(p.answers)
+    || JSON.stringify(portfolioIds) !== JSON.stringify(p.portfolioProjectIds ?? []));
   const bidValid = bid.trim() === "" || Number.isFinite(Number(bid));
   const locked = !!p && (p.status === "submitted" || p.status === "discarded");
 
@@ -236,6 +385,7 @@ export default function ProposalEditor() {
     setAnswers(p.answers);
     setBid(p.bid == null ? "" : String(p.bid));
     setDuration(p.estimatedDuration ?? "");
+    setPortfolioIds(p.portfolioProjectIds ?? []);
     setLoom(p.loomUrl ?? "");
     setLoadedAt(p.updatedAt);
   }
@@ -247,7 +397,7 @@ export default function ProposalEditor() {
     const n = ++saveSeq.current;
     setSaveState("saving");
     try {
-      const next = await endpoints.editProposal(p.id, { coverLetter: letter.slice(0, COVER_MAX), answers, bid: bid.trim() === "" ? null : Number(bid), estimatedDuration: duration || undefined });
+      const next = await endpoints.editProposal(p.id, { coverLetter: letter.slice(0, COVER_MAX), answers, bid: bid.trim() === "" ? null : Number(bid), estimatedDuration: duration || undefined, portfolioProjectIds: portfolioIds });
       if (n === saveSeq.current) {
         q.setData(next);
         setLoadedAt(next.updatedAt);
@@ -265,12 +415,12 @@ export default function ProposalEditor() {
   // (Each server save is one queued job for the home worker, so the pause is longer than the web editor's.)
   useEffect(() => {
     if (!p || locked || !dirty || !loadedAt) return;
-    const snap: Cached = { letter, answers, bid, duration, savedAt: Date.now() };
+    const snap: Cached = { letter, answers, bid, duration, portfolioIds, savedAt: Date.now() };
     AsyncStorage.setItem(CACHE(p.id), JSON.stringify(snap)).catch(() => {});
     const t = setTimeout(() => { void persist(); }, AUTOSAVE_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [letter, answers, bid, duration]);
+  }, [letter, answers, bid, duration, portfolioIds]);
 
   // Edits made on this phone that never reached the server (app closed, worker offline): offer them back.
   useEffect(() => {
@@ -279,10 +429,13 @@ export default function ProposalEditor() {
     AsyncStorage.getItem(CACHE(p.id)).then((raw) => {
       if (!raw) return;
       const c = JSON.parse(raw) as Cached;
-      const same = c.letter === p.coverLetter && c.bid === (p.bid == null ? "" : String(p.bid)) && c.duration === (p.estimatedDuration ?? "") && JSON.stringify(c.answers) === JSON.stringify(p.answers);
+      const serverIds = p.portfolioProjectIds ?? [];
+      const same = c.letter === p.coverLetter && c.bid === (p.bid == null ? "" : String(p.bid)) && c.duration === (p.estimatedDuration ?? "") && JSON.stringify(c.answers) === JSON.stringify(p.answers)
+        && JSON.stringify(c.portfolioIds ?? serverIds) === JSON.stringify(serverIds);
       if (same || c.savedAt < Date.parse(p.updatedAt) || locked) { AsyncStorage.removeItem(CACHE(p.id)).catch(() => {}); return; }
       setLetter(c.letter); setAnswers(c.answers); setBid(c.bid); setDuration(c.duration);
-      setRestored({ letter: p.coverLetter, answers: p.answers, bid: p.bid == null ? "" : String(p.bid), duration: p.estimatedDuration ?? "", savedAt: 0 });
+      if (c.portfolioIds) setPortfolioIds(c.portfolioIds);
+      setRestored({ letter: p.coverLetter, answers: p.answers, bid: p.bid == null ? "" : String(p.bid), duration: p.estimatedDuration ?? "", portfolioIds: serverIds, savedAt: 0 });
     }).catch(() => {});
   }, [p, loadedAt, locked]);
 
@@ -377,7 +530,7 @@ export default function ProposalEditor() {
         {error ? <Banner tone="bad" title="That didn't work">{error}</Banner> : null}
         {restored ? (
           <Banner tone="warn" title="Restored edits from this phone" action={<Button small label="Use saved version" onPress={() => {
-            setLetter(restored.letter); setAnswers(restored.answers); setBid(restored.bid); setDuration(restored.duration);
+            setLetter(restored.letter); setAnswers(restored.answers); setBid(restored.bid); setDuration(restored.duration); setPortfolioIds(restored.portfolioIds ?? []);
             setRestored(null); AsyncStorage.removeItem(CACHE(p.id)).catch(() => {});
           }} />}>These edits hadn&apos;t reached the server. They save again in a moment.</Banner>
         ) : null}
@@ -423,6 +576,7 @@ export default function ProposalEditor() {
             </View>
           </Card>
         ) : null}
+        {p.status === "previewed" ? <BoostCard key={`${p.previewId}`} p={p} busy={busy === "boost"} onSet={(connects) => run("boost", () => endpoints.boost(p.id, connects))} /> : null}
         {p.status === "submitted" ? <Banner tone="good" title={manual ? "Sent on Upwork" : "Submitted"}>{`${manual ? "You sent it on Upwork" : "Sent"}${p.submittedAt ? ` ${timeAgo(p.submittedAt)}` : ""}. Follow the client's reply in Closer.`}</Banner> : null}
         {p.status === "discarded" ? <Banner tone="neutral" title="Discarded">Kept for the feedback loop; it can still be read.</Banner> : null}
 
@@ -486,6 +640,9 @@ export default function ProposalEditor() {
             </View>
           ) : null}
         </Card>
+
+        {/* 4b. Portfolio - Upwork attachments and portfolio-site links */}
+        <PortfolioCard jobId={p.jobId} ids={portfolioIds} setIds={setPortfolioIds} letter={letter} setLetter={setLetter} locked={locked} />
 
         {/* 5. Folded away */}
         {upwork ? (
@@ -554,6 +711,7 @@ export default function ProposalEditor() {
           <Card>
             <KV label="Bid" value={money(p.bid)} />
             <KV label="Loom" value={p.loomUrl ? "Attached" : "None (optional)"} tone={p.loomUrl ? "good" : undefined} />
+            <KV label="Boost" value={p.preview?.boostConnects ? `${String(p.preview.boostConnects)} Connects bid` : "None"} />
             <KV label="Cover letter" value={`${p.coverLetter.length.toLocaleString("en-US")} chars`} />
           </Card>
           <Field label='Type SUBMIT to confirm' value={confirmText} onChangeText={setConfirmText} autoCapitalize="characters" autoCorrect={false} autoFocus placeholder="SUBMIT" />

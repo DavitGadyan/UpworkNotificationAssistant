@@ -1,4 +1,5 @@
 import { getSettings, kvGet, kvSet, listProposalOutcomesSafe } from "../db";
+import { replyLure } from "../ranking/scam";
 import { mcpCallsToday } from "../upwork/guard";
 import { llmReady } from "../agents/llm";
 import { buildWorkHistory, workHistory } from "../agents/workHistory";
@@ -109,7 +110,9 @@ async function notifyReplies() {
   const fresh = (await listProposalOutcomesSafe({ outcome: "win", limit: 50 }))
     .filter((o) => !sent.has(o.upworkProposalId) && Date.now() - Date.parse(o.repliedAt ?? o.submittedAt) < 2 * DAY);
   for (const o of fresh) {
-    await sendText(`💬 <b>Client replied</b> to your proposal: ${escapeHtml(o.jobTitle)}${o.firstReply ? `\n“${escapeHtml(o.firstReply.slice(0, 200))}”` : ""}\nOpen Upwork messages to answer.`).catch(() => undefined);
+    const lure = replyLure(o.firstReply) ?? (o.job?.flags ?? []).find((f) => /malware lure/i.test(f)) ?? null;
+    const warn = lure ? `\n🚨 <b>Possible fake-job malware lure</b> (${escapeHtml(lure.slice(0, 80))}). Never clone, install or run their code or files; if it is one, report it with <code>npm run scam -- ${escapeHtml(o.jobId)} "reason"</code>.` : "";
+    await sendText(`💬 <b>Client replied</b> to your proposal: ${escapeHtml(o.jobTitle)}${o.firstReply ? `\n“${escapeHtml(o.firstReply.slice(0, 200))}”` : ""}\nOpen Upwork messages to answer.${warn}`).catch(() => undefined);
     sent.add(o.upworkProposalId);
   }
   await kvSet("reply_notified", [...sent].slice(-300));

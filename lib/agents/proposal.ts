@@ -54,17 +54,23 @@ const DraftSchema = z.object({
 
 interface Highlights { fetchedAt: number; certificates: { id: string; name: string }[]; portfolio_projects: { id: string; title: string }[] }
 
-/** Upwork portfolio items that can be attached to a proposal (cached for a day). */
-export async function highlights(): Promise<Highlights | null> {
+/**
+ * Upwork portfolio items that can be attached to a proposal (cached for a day). `fetch: false` never calls Upwork
+ * (the proposal page reads the cache only); `force` skips the cache (the editor's Refresh button).
+ */
+export async function highlights(opts: { force?: boolean; fetch?: boolean } = {}): Promise<Highlights | null> {
   const cached = await kvGet<Highlights>("upwork_highlights");
-  if (cached && Date.now() - cached.fetchedAt < 864e5) return cached;
-  if (await activeSource() !== "mcp") return cached;
+  if (!opts.force && cached && Date.now() - cached.fetchedAt < 864e5) return cached;
+  if (opts.fetch === false || await activeSource() !== "mcp") return cached;
   try {
     const r = await callTool<Omit<Highlights, "fetchedAt">>("get_profile", "list_highlights");
     const h = { fetchedAt: Date.now(), certificates: r.certificates ?? [], portfolio_projects: r.portfolio_projects ?? [] };
     await kvSet("upwork_highlights", h);
     return h;
-  } catch { return cached; }
+  } catch (e) {
+    if (opts.force) throw e; // the Refresh button shows why it failed
+    return cached;
+  }
 }
 
 /** Distilled from knowledge_base/closer_playbook.md for the very first message. */

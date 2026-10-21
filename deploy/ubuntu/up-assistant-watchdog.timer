@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Up Assistant watchdog every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=20s
+Unit=up-assistant-watchdog.service
+
+[Install]
+WantedBy=timers.target

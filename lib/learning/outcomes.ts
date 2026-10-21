@@ -4,6 +4,7 @@ import { noteViews } from "./kpis";
 import { assessProfileFit } from "../ranking/profileFit";
 import type { OutcomeJob, OutcomeLabel, ProposalOutcome } from "../types";
 import { callTool } from "../upwork/mcp/client";
+import { scamAware, scamJobs } from "./scamJobs";
 import { getJobDetailMcp } from "../upwork/mcp/jobs";
 import { isClientReply, isInvite, parseProposalDetail, parseProposalList, parseStories, type UpworkProposalRow } from "../upwork/mcp/proposals";
 
@@ -75,6 +76,7 @@ export async function syncProposalOutcomes(opts: { mode?: "light" | "full"; page
     return await callTool<T>(tool, action, params);
   };
 
+  const scams = await scamJobs();
   try {
     // 1. Lists: one row per proposal (each one sits under exactly one status).
     const seen = new Map<string, UpworkProposalRow>();
@@ -105,7 +107,7 @@ export async function syncProposalOutcomes(opts: { mode?: "light" | "full"; page
         ...base, jobTitle: x.jobTitle || base.jobTitle, localProposalId: lp?.id ?? base.localProposalId, status: x.status, statusLabel: x.statusLabel,
         archiveReason: x.archiveReason, viewed: x.viewed || base.viewed, boosted: x.boosted, connectsBid: x.connectsBid, bid: x.bid, bidLabel: x.bidLabel, updatedAt: now,
       };
-      next.outcome = classifyOutcome(next, now);
+      next.outcome = scamAware(next.jobId, classifyOutcome(next, now), scams);
       // A status or "viewed" change is worth a room check now (an interview invite opens a room).
       next.nextCheckAt = changed && next.outcome !== "void" && !next.repliedAt ? now : cur ? cur.nextCheckAt : now;
       if (!cur) res.added++; else if (changed) res.changed++;
@@ -134,7 +136,7 @@ export async function syncProposalOutcomes(opts: { mode?: "light" | "full"; page
         ...o, checks: o.checks + 1, updatedAt: now, roomId: room?.roomId ?? o.roomId, job,
         ...(reply ? { repliedAt: reply.at, firstReply: reply.text } : {}),
       };
-      next.outcome = classifyOutcome(next, now);
+      next.outcome = scamAware(next.jobId, classifyOutcome(next, now), scams);
       next.nextCheckAt = nextReplyCheck(next, now);
       if (next.outcome === "win" && o.outcome !== "win") res.newWins.push(next.jobTitle);
       await saveProposalOutcome(next);

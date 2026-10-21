@@ -9,6 +9,7 @@ import { describeHits, normalizeHeadings, placeholderHits } from "./clean";
  *   1. approve     - David approves the final text                                  → status "approved"
  *   2. preview     - manage_proposals create (or accept_invitation) builds Upwork's preview
  *                    (Connects cost, balance, boost, unmet qualifications)         → status "previewed"
+ *      2b. boost   - optional: setBoost() rebuilds the preview with a Connects boost bid David picked
  *   3. submit      - confirm_preview with the stored preview_id (second tap)       → status "submitted"
  * A Loom video is optional but preferred (David, 2026-10-20): attachLoom() puts a real Loom share link in place of
  * the {{LOOM_URL}} placeholder (status "ready"); approving without one simply removes the Loom line, so the
@@ -48,7 +49,7 @@ export async function editDraft(id: number, patch: Partial<Pick<Proposal, "cover
   // The editor autosaves as David types: a save that changes nothing must not undo an approval or a preview.
   if ((Object.keys(patch) as (keyof typeof patch)[]).every((k) => JSON.stringify(patch[k] ?? null) === JSON.stringify(p[k] ?? null))) return p;
   const status = p.status === "approved" || p.status === "previewed" ? "ready" : p.status;
-  return (await updateProposal(id, { ...patch, status, approvedAt: status === "ready" ? null : p.approvedAt, previewId: null, preview: { ...(p.preview ?? {}), upwork: undefined } }))!;
+  return (await updateProposal(id, { ...patch, status, approvedAt: status === "ready" ? null : p.approvedAt, previewId: null, preview: { ...(p.preview ?? {}), upwork: undefined, boost: undefined, boostConnects: undefined } }))!;
 }
 
 export async function attachLoom(id: number, url: string): Promise<Proposal> {
@@ -105,16 +106,26 @@ export async function preview(id: number): Promise<Proposal> {
   if (p.bid == null || p.bid <= 0) throw new GateError("Set a bid amount first");
   assertClientReady(p);
 
-  // Upwork rejects create when an invitation or a proposal already exists for the job - check both.
+  return buildPreview(p, await checkExisting(p), null);
+}
+
+/** Upwork rejects create when an invitation or a proposal already exists for the job - check both. Returns the invitation id. */
+async function checkExisting(p: Proposal): Promise<string | null> {
   const inv = await callTool<{ invitations?: { id: string }[]; data?: unknown }>("list_freelancer_proposals", "invitations", { job_posting_id: p.jobId, limit: 1 });
   const invitationId = inv.invitations?.[0]?.id ?? null;
   const existing = await callTool<{ proposals?: { job?: { id?: string }; jobPosting?: { id?: string } }[] }>("list_freelancer_proposals", "list", { status: "Accepted", limit: 10 });
   if ((existing.proposals ?? []).some((x) => (x.job?.id ?? x.jobPosting?.id) === p.jobId)) throw new GateError("You already have a proposal on this job");
+  return invitationId;
+}
 
+/** Ask Upwork for the preview (create or accept_invitation), optionally with a Connects boost bid. */
+async function buildPreview(p: Proposal, invitationId: string | null, boostConnects: number | null): Promise<Proposal> {
+  const id = p.id;
   const common = {
     cover_letter: p.coverLetter,
     ...(p.answers.length ? { answers: p.answers } : {}),
     ...(p.portfolioProjectIds.length ? { portfolio_project_ids: p.portfolioProjectIds } : {}),
+    ...(boostConnects ? { boost_connects: boostConnects } : {}),
   };
   // Hourly jobs refuse estimated_duration / payment_mode / milestones; fixed-price jobs require estimated_duration and
   // payment_mode. The job type comes from our job record (the draft's bidType is only the writer's guess); if Upwork
@@ -152,8 +163,52 @@ export async function preview(id: number): Promise<Proposal> {
   if (!previewId) throw new GateError(`Upwork did not return a preview: ${JSON.stringify(r).slice(0, 400)}`);
   return (await updateProposal(id, {
     status: "previewed", previewId,
-    preview: { ...(p.preview ?? {}), upwork: r, type: invitationId ? "proposal_accept_invitation" : "proposal" },
+    preview: {
+      ...(p.preview ?? {}), upwork: r, type: invitationId ? "proposal_accept_invitation" : "proposal", invitationId,
+      boost: boostInfo(r) ?? (p.preview?.boost as BoostInfo | undefined) ?? null, boostConnects,
+    },
   }))!;
+}
+
+/** Upwork's boost block from a create preview, in a shape both apps can show. */
+export interface BoostInfo {
+  available: boolean; reason: string | null; skip: boolean;
+  recommended: number | null; max: number | null; topBids: number[] | null; note: string | null;
+}
+
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : null);
+
+export function boostInfo(r: Record<string, unknown> | null | undefined): BoostInfo | null {
+  const b = (r?.boost ?? (r?.preview as Record<string, unknown> | undefined)?.boost) as Record<string, unknown> | undefined;
+  if (!b || typeof b !== "object") return null;
+  const bids = b.current_top_bids_available === false || !Array.isArray(b.current_top_bids) ? null
+    : (b.current_top_bids as unknown[]).map((x) => num(x) ?? (x && typeof x === "object" ? num((x as Record<string, unknown>).connects ?? (x as Record<string, unknown>).bid ?? (x as Record<string, unknown>).amount) : null)).filter((x): x is number => x != null);
+  return {
+    available: b.available !== false, reason: typeof b.reason === "string" ? b.reason : null, skip: b.recommendation === "skip",
+    recommended: num(b.recommended_connects), max: num(b.max_boost_connects), topBids: bids, note: typeof b.note === "string" ? b.note : null,
+  };
+}
+
+/**
+ * Boost bid (David, 2026-10-21): after the plain preview, David may bid extra Connects for a top slot on the client's
+ * list. The preview is rebuilt with boost_connects, so the SUBMIT tap confirms exactly that bid; null takes it off.
+ * Night auto-apply never boosts - only this explicit step does.
+ */
+export async function setBoost(id: number, connects: number | null): Promise<Proposal> {
+  const p = await must(id);
+  if (p.status !== "previewed" || !p.approvedAt) throw new GateError("Build the Upwork preview first");
+  const current = (p.preview?.boostConnects as number | null | undefined) ?? null;
+  if (connects === current) return p;
+  if (connects != null) {
+    const b = (p.preview?.boost as BoostInfo | null | undefined) ?? null;
+    if (!b) throw new GateError("Upwork's preview has no boost details for this job - rebuild the preview");
+    if (!b.available) throw new GateError(`Boosting isn't available on this job${b.reason ? `: ${b.reason}` : ""}`);
+    if (!Number.isInteger(connects) || connects < 1) throw new GateError("A boost is a whole number of Connects, at least 1");
+    if (b.recommended != null && connects < b.recommended) throw new GateError(`Bid at least ${b.recommended} Connects - less would not take a top slot`);
+    if (b.max != null && connects > b.max) throw new GateError(`At most ${b.max} Connects - the rest of your balance pays for the proposal itself`);
+  }
+  const invitationId = "invitationId" in (p.preview ?? {}) ? ((p.preview?.invitationId as string | null) ?? null) : await checkExisting(p);
+  return buildPreview(p, invitationId, connects);
 }
 
 export async function submit(id: number, confirmText: string): Promise<Proposal> {
@@ -163,7 +218,16 @@ export async function submit(id: number, confirmText: string): Promise<Proposal>
   if (!p.approvedAt) throw new GateError("Approval is required");
   if (p.coverLetter.includes(LOOM_PLACEHOLDER)) throw new GateError("The cover letter still has the Loom placeholder");
   const type = (p.preview?.type as string | undefined) ?? "proposal";
-  const r = await callTool<Record<string, unknown>>("confirm_preview", "confirm", { type, preview_id: p.previewId });
+  const boosted = (p.preview?.boostConnects as number | null | undefined) ?? null;
+  let r: Record<string, unknown>;
+  try {
+    r = await callTool<Record<string, unknown>>("confirm_preview", "confirm", { type, preview_id: p.previewId });
+  } catch (e) {
+    // Upwork re-reads the bids on confirm and refuses a boost that no longer takes a paid slot (nothing is sent).
+    if (boosted) throw new GateError(`Upwork did not submit - the ${boosted}-Connect boost may no longer take a top slot. Change the boost and try again. (${(e as Error).message})`);
+    throw e;
+  }
+  if (r.submitted === false) throw new GateError(`Upwork did not submit: ${JSON.stringify(r).slice(0, 300)}`);
   await setJobStatus(p.jobId, "applied");
   return (await updateProposal(id, { status: "submitted", submittedAt: new Date().toISOString(), preview: { ...(p.preview ?? {}), submitResult: r } }))!;
 }

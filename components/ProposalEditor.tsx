@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FeedbackButtons } from "@/components/FeedbackButtons";
 import { IconCheck, IconExternal, IconLink, IconRefresh, IconSend } from "@/components/icons";
 import { Bullets, Note, Spinner } from "@/components/ui/bits";
 import { CopyButton } from "@/components/ui/CopyButton";
 import { CONTACT_ROLE_LABELS, fmtDateTime, PROPOSAL_STATUS, percentChanged } from "@/lib/format";
 import { findPlaceholders } from "@/lib/proposals/clean";
+import { addProjectLink, hasProjectLink, removeProjectLink, type PortfolioChoices } from "@/lib/proposals/similarWork";
 import type { Proposal } from "@/lib/types";
 
 const LOOM_PLACEHOLDER = "{{LOOM_URL}}";
@@ -18,7 +19,7 @@ const MAX = 5000;
 const AUTOSAVE_MS = 1200;
 const cacheKey = (id: number) => `proposal-draft:${id}`;
 type Answer = { question: string; answer: string };
-interface Cached { cover: string; answers: Answer[]; bid: string; duration: string; savedAt: number }
+interface Cached { cover: string; answers: Answer[]; bid: string; duration: string; portfolioIds?: string[]; savedAt: number }
 type SaveState = "idle" | "saving" | "saved" | "retrying";
 
 // Browser copy of unsaved edits, so a closed tab or a dropped connection never loses text (per browser, best effort).
@@ -33,10 +34,10 @@ function PlaceholderWarning({ text }: { text: string }) {
   return <p role="alert" className="mt-1.5 text-[13px] text-[var(--color-bad)]">Remove before sending: {found.map((f) => `"${f.length > 60 ? `${f.slice(0, 57)}…` : f}"`).join(", ")}</p>;
 }
 
-type Action = "save" | "loom" | "approve" | "preview" | "submit" | "discard" | "rewrite";
+type Action = "save" | "loom" | "approve" | "preview" | "boost" | "submit" | "discard" | "rewrite";
 
 /** The full submit gate on one page: edit → (optional Loom) → approve → Upwork preview → typed SUBMIT. */
-export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { initial: Proposal; screeningQuestions: string[]; connectsCost: number | null }) {
+export function ProposalEditor({ initial, screeningQuestions, connectsCost, portfolio }: { initial: Proposal; screeningQuestions: string[]; connectsCost: number | null; portfolio: PortfolioChoices }) {
   const router = useRouter();
   const [p, setP] = useState(initial);
   const [cover, setCover] = useState(initial.coverLetter);
@@ -46,6 +47,7 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
   });
   const [bid, setBid] = useState(initial.bid != null ? String(initial.bid) : "");
   const [duration, setDuration] = useState(initial.estimatedDuration ?? "");
+  const [portfolioIds, setPortfolioIds] = useState<string[]>(initial.portfolioProjectIds ?? []);
   const [loom, setLoom] = useState(initial.loomUrl ?? "");
   const [busy, setBusy] = useState<Action | null>(null);
   const [error, setError] = useState<{ at: Action; msg: string } | null>(null);
@@ -60,7 +62,8 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
   const dirty = cover !== p.coverLetter
     || JSON.stringify(answers) !== JSON.stringify(serverAnswers(p))
     || bid !== (p.bid != null ? String(p.bid) : "")
-    || duration !== (p.estimatedDuration ?? "");
+    || duration !== (p.estimatedDuration ?? "")
+    || JSON.stringify(portfolioIds) !== JSON.stringify(p.portfolioProjectIds ?? []);
   const locked = p.status === "submitted" || p.status === "discarded";
   const bidValid = bid === "" || Number.isFinite(Number(bid));
 
@@ -68,13 +71,13 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
   const seq = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const retries = useRef(0);
-  const latest = useRef({ cover, answers, bid, duration, dirty, locked, bidValid });
-  latest.current = { cover, answers, bid, duration, dirty, locked, bidValid };
+  const latest = useRef({ cover, answers, bid, duration, portfolioIds, dirty, locked, bidValid });
+  latest.current = { cover, answers, bid, duration, portfolioIds, dirty, locked, bidValid };
   const inflight = useRef<Promise<boolean> | null>(null);
 
   const patchBody = () => {
     const l = latest.current;
-    return JSON.stringify({ coverLetter: l.cover, answers: l.answers, bid: l.bid === "" ? null : Number(l.bid), estimatedDuration: l.duration });
+    return JSON.stringify({ coverLetter: l.cover, answers: l.answers, bid: l.bid === "" ? null : Number(l.bid), estimatedDuration: l.duration, portfolioProjectIds: l.portfolioIds });
   };
   /** Save what is on screen now. Only the server copy is updated, never the text boxes, so typing is never overwritten. */
   const saveNow = useCallback(async (opts: { keepalive?: boolean } = {}): Promise<boolean> => {
@@ -107,11 +110,11 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
   // Every change: keep a browser copy at once, save to the server a moment after typing stops.
   useEffect(() => {
     if (locked || !dirty) return;
-    writeCache(p.id, { cover, answers, bid, duration, savedAt: Date.now() });
+    writeCache(p.id, { cover, answers, bid, duration, portfolioIds, savedAt: Date.now() });
     clearTimeout(timer.current);
     timer.current = setTimeout(() => { void saveNow(); }, AUTOSAVE_MS);
     return () => clearTimeout(timer.current);
-  }, [cover, answers, bid, duration]);
+  }, [cover, answers, bid, duration, portfolioIds]);
 
   // Leaving or hiding the tab: save straight away (keepalive lets the request finish after the page closes).
   useEffect(() => {
@@ -127,14 +130,16 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
     const c = readCache(initial.id);
     if (!c || locked) return;
     const same = c.cover === initial.coverLetter && JSON.stringify(c.answers) === JSON.stringify(serverAnswers(initial))
-      && c.bid === (initial.bid != null ? String(initial.bid) : "") && c.duration === (initial.estimatedDuration ?? "");
+      && c.bid === (initial.bid != null ? String(initial.bid) : "") && c.duration === (initial.estimatedDuration ?? "")
+      && JSON.stringify(c.portfolioIds ?? initial.portfolioProjectIds ?? []) === JSON.stringify(initial.portfolioProjectIds ?? []);
     if (same || c.savedAt <= Date.parse(initial.updatedAt)) { clearCache(initial.id); return; }
     setCover(c.cover); setAnswers(c.answers.map((a) => ({ ...a }))); setBid(c.bid); setDuration(c.duration);
+    if (c.portfolioIds) setPortfolioIds(c.portfolioIds);
     setRestored(c);
   }, []);
   const undoRestore = () => {
     setCover(p.coverLetter); setAnswers(serverAnswers(p).map((a) => ({ ...a })));
-    setBid(p.bid != null ? String(p.bid) : ""); setDuration(p.estimatedDuration ?? "");
+    setBid(p.bid != null ? String(p.bid) : ""); setDuration(p.estimatedDuration ?? ""); setPortfolioIds(p.portfolioProjectIds ?? []);
     clearCache(p.id); setRestored(null);
   };
   /** Before approve / preview / rewrite: make sure the server has exactly what is on screen. */
@@ -149,7 +154,7 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
       if (!res.ok) throw new Error(body.error ?? `Request failed (${res.status})`);
       setP(body); setCover(body.coverLetter); setLoom(body.loomUrl ?? "");
       if (body.answers.length) setAnswers(body.answers.map((a) => ({ ...a })));
-      setBid(body.bid != null ? String(body.bid) : ""); setDuration(body.estimatedDuration ?? "");
+      setBid(body.bid != null ? String(body.bid) : ""); setDuration(body.estimatedDuration ?? ""); setPortfolioIds(body.portfolioProjectIds ?? []);
       clearCache(body.id); setRestored(null);
       if (done) setOk(done);
       router.refresh();
@@ -274,6 +279,8 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
             {connectsCost != null && <p className="mt-3 text-[14px] text-[var(--color-muted)]">This job costs {connectsCost} Connects to apply.</p>}
           </section>
 
+          <PortfolioCard jobId={p.jobId} initial={portfolio} ids={portfolioIds} setIds={setPortfolioIds} cover={cover} setCover={setCover} locked={locked} />
+
           {!locked && (
             <div className="flex flex-wrap items-center gap-2 rounded-[16px] border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-[14px]" aria-live="polite">
               {saveState === "saving" || (dirty && saveState !== "retrying")
@@ -327,6 +334,9 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
               {err("preview")}
             </div>
 
+            {/* 3b. Boost (optional) */}
+            {p.status === "previewed" && <BoostStep p={p} busy={busy === "boost"} onSet={(connects) => act("boost", { connects }, connects == null ? "Boost removed" : `Boost set to ${connects} Connects`)} error={err("boost")} />}
+
             {/* 4. Submit */}
             <div className="mt-4 border-t border-[var(--color-line)] pt-4">
               <p className="flex items-center gap-2 font-medium"><Num n={3} done={has("submitted")} />Submit</p>
@@ -336,7 +346,7 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
                 </button>
               ) : (
                 <form className="mt-3 grid gap-2 rounded-[14px] bg-[var(--color-sunken)] p-3" onSubmit={(e) => { e.preventDefault(); act("submit", { confirm: typed }, "Submitted").then((ok) => ok && setConfirming(false)); }}>
-                  <label htmlFor="confirm" className="text-[14px]">This spends Connects and sends the proposal to the client. Type <b>SUBMIT</b> to confirm.</label>
+                  <label htmlFor="confirm" className="text-[14px]">This spends Connects and sends the proposal to the client{p.preview?.boostConnects ? <>, with a <b>{String(p.preview.boostConnects)}-Connect boost</b> bid</> : null}. Type <b>SUBMIT</b> to confirm.</label>
                   <input id="confirm" className="input" autoFocus autoComplete="off" autoCapitalize="characters" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="SUBMIT" />
                   <div className="flex flex-wrap gap-2">
                     <button type="submit" className="btn btn-accent" disabled={typed !== "SUBMIT" || busy === "submit"}>{busy === "submit" ? <><Spinner />Submitting…</> : "Submit proposal"}</button>
@@ -400,6 +410,116 @@ export function ProposalEditor({ initial, screeningQuestions, connectsCost }: { 
   );
 }
 
+/**
+ * Portfolio items for this proposal. Upwork portfolio items are real attachments (saved as portfolioProjectIds and
+ * sent with the Upwork preview). Portfolio-site projects can't be attached by Upwork, so "Add to letter" puts a
+ * "Similar work:" line with the link into the cover letter, where David can see and edit it. Both autosave.
+ */
+function PortfolioCard({ jobId, initial, ids, setIds, cover, setCover, locked }: {
+  jobId: string; initial: PortfolioChoices; ids: string[]; setIds: (v: string[]) => void;
+  cover: string; setCover: (v: string) => void; locked: boolean;
+}) {
+  const [choices, setChoices] = useState(initial);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+  const { items, checkedAt, canRefresh } = choices.upwork;
+  const unknown = ids.filter((id) => !items.some((i) => i.id === id));
+  const relevant = choices.site.relevant.map((id) => choices.site.projects.find((p) => p.id === id)).filter((p): p is PortfolioChoices["site"]["projects"][number] => !!p);
+  const others = choices.site.projects.filter((p) => !choices.site.relevant.includes(p.id) && (!filter.trim() || `${p.title} ${p.summary}`.toLowerCase().includes(filter.trim().toLowerCase())));
+  const inLetter = choices.site.projects.filter((p) => hasProjectLink(cover, p.url)).length;
+
+  const toggleId = (id: string) => setIds(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
+  const refresh = async () => {
+    setRefreshing(true); setRefreshError(null);
+    try {
+      const res = await fetch(`/api/portfolio?jobId=${encodeURIComponent(jobId)}&refresh=1`);
+      const body = (await res.json().catch(() => ({}))) as PortfolioChoices & { error?: string };
+      if (!res.ok) throw new Error(body.error ?? `Refresh failed (${res.status})`);
+      setChoices(body);
+    } catch (e) { setRefreshError((e as Error).message); } finally { setRefreshing(false); }
+  };
+
+  const projectRow = (pr: PortfolioChoices["site"]["projects"][number], best: boolean) => {
+    const added = hasProjectLink(cover, pr.url);
+    return (
+      <li key={pr.id} className="flex items-start gap-3 py-3">
+        <div className="min-w-0 flex-1">
+          <p className="flex flex-wrap items-center gap-2 font-medium">
+            <span className="break-words">{pr.title}</span>
+            {best && <span className="pill pill-info">Matches this job</span>}
+          </p>
+          <p className="mt-0.5 line-clamp-2 text-[13px] leading-relaxed text-[var(--color-muted)]">{pr.summary}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <a className="btn btn-sm btn-ghost" href={pr.url} target="_blank" rel="noopener noreferrer" aria-label={`Open ${pr.title}`}><IconExternal size={14} /></a>
+          <button type="button" className={`btn btn-sm ${added ? "" : "btn-ghost"}`} disabled={locked} aria-pressed={added}
+            onClick={() => setCover(added ? removeProjectLink(cover, pr.url) : addProjectLink(cover, pr))}>
+            {added ? <><IconCheck size={14} />In letter</> : "Add to letter"}
+          </button>
+        </div>
+      </li>
+    );
+  };
+
+  return (
+    <section className="card p-5 md:p-6" aria-labelledby="pf-h">
+      <h2 id="pf-h" className="display text-[20px] font-semibold">Portfolio</h2>
+      <p className="mt-1 text-[14px] text-[var(--color-muted)]">Attach items from your Upwork portfolio, or add links to projects from your portfolio site.</p>
+
+      <div className="mt-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-medium">Upwork portfolio items <span className="text-[13px] font-normal text-[var(--color-muted)]">attached to the proposal</span></p>
+          {canRefresh && (
+            <button type="button" className="btn btn-sm btn-ghost" onClick={refresh} disabled={refreshing} aria-busy={refreshing} title="Read the list from your Upwork profile again (one Upwork call)">
+              {refreshing ? <Spinner /> : <IconRefresh size={14} />}Refresh
+            </button>
+          )}
+        </div>
+        {items.length > 0 || unknown.length > 0 ? (
+          <ul className="mt-2 grid gap-1.5">
+            {items.map((it) => (
+              <li key={it.id}>
+                <label className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-[12px] px-2 hover:bg-[var(--color-sunken)]">
+                  <input type="checkbox" className="size-4 shrink-0" checked={ids.includes(it.id)} disabled={locked} onChange={() => toggleId(it.id)} />
+                  <span className="min-w-0 break-words">{it.title}</span>
+                </label>
+              </li>
+            ))}
+            {unknown.map((id) => (
+              <li key={id}>
+                <label className="flex min-h-[44px] cursor-pointer items-center gap-3 rounded-[12px] px-2 hover:bg-[var(--color-sunken)]">
+                  <input type="checkbox" className="size-4 shrink-0" checked disabled={locked} onChange={() => toggleId(id)} />
+                  <span className="min-w-0 break-words text-[var(--color-warn)]">Item {id} - no longer on your Upwork profile; untick to remove</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <Note className="mt-2">
+            Your Upwork profile has no portfolio items Upwork can attach{checkedAt ? ` (checked ${fmtDateTime(checkedAt)})` : ""}.
+            Add them on Upwork under Profile → Portfolio, then press Refresh. Until then, add project links to the letter below.
+          </Note>
+        )}
+        {refreshError && <p role="alert" className="mt-2 text-[13px] text-[var(--color-bad)]">{refreshError}</p>}
+        {ids.length > 0 && <p className="mt-2 text-[13px] text-[var(--color-muted)]">{ids.length} attached. They go to Upwork with the preview; changing them after approval asks for a fresh approval.</p>}
+      </div>
+
+      <div className="mt-5 border-t border-[var(--color-line)] pt-4">
+        <p className="font-medium">Portfolio-site projects <span className="text-[13px] font-normal text-[var(--color-muted)]">added to the letter as a link{inLetter ? ` · ${inLetter} in the letter` : ""}</span></p>
+        {relevant.length > 0 && <ul className="divide-row mt-1">{relevant.map((pr) => projectRow(pr, true))}</ul>}
+        <details className="mt-2" open={relevant.length === 0}>
+          <summary className="cursor-pointer text-[14px] font-medium text-[var(--color-muted)]">{relevant.length ? "All other projects" : "All projects"} ({choices.site.projects.length - relevant.length})</summary>
+          <label className="sr-only" htmlFor="pf-filter">Filter projects</label>
+          <input id="pf-filter" className="input mt-3" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by title or topic" />
+          <ul className="divide-row mt-1 max-h-[420px] overflow-auto">{others.map((pr) => projectRow(pr, false))}</ul>
+          {others.length === 0 && <p className="mt-2 text-[13px] text-[var(--color-muted)]">No project matches that filter.</p>}
+        </details>
+      </div>
+    </section>
+  );
+}
+
 /** Step number; n = 0 is the optional Loom row (shown as a link icon, never a number). */
 function Num({ n, done }: { n: number; done: boolean }) {
   return (
@@ -414,6 +534,44 @@ function Kv({ label, children }: { label: string; children: React.ReactNode }) {
     <div className="min-w-0">
       <p className="mb-1 text-[13px] font-medium text-[var(--color-muted)]">{label}</p>
       <div className="break-words leading-relaxed">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Optional Connects boost for a top slot on the client's list (Upwork charges it only if the proposal lands in a paid
+ * slot or the client engages before the auction closes). Shows Upwork's minimum, maximum and the competing bids; setting
+ * or removing a boost rebuilds the Upwork preview, so the SUBMIT tap confirms exactly what is shown.
+ */
+function BoostStep({ p, busy, onSet, error }: { p: Proposal; busy: boolean; onSet: (connects: number | null) => void; error: ReactNode }) {
+  const b = (p.preview?.boost ?? null) as { available: boolean; reason: string | null; skip: boolean; recommended: number | null; max: number | null; topBids: number[] | null; note: string | null } | null;
+  const current = (p.preview?.boostConnects as number | null | undefined) ?? null;
+  const [amount, setAmount] = useState(current != null ? String(current) : b?.recommended != null ? String(b.recommended) : "");
+  const n = Number(amount);
+  const valid = amount.trim() !== "" && Number.isInteger(n) && n >= Math.max(1, b?.recommended ?? 1) && (b?.max == null || n <= b.max);
+  return (
+    <div className="mt-4 border-t border-[var(--color-line)] pt-4">
+      <p className="flex items-center gap-2 font-medium"><Num n={0} done={current != null} />Boost <span className="text-[13px] font-normal text-[var(--color-muted)]">optional, extra Connects for a top slot</span></p>
+      {!b ? <p className="mt-2 text-[13px] text-[var(--color-muted)]">Upwork's preview has no boost details for this job.</p>
+        : !b.available ? <p className="mt-2 text-[13px] text-[var(--color-muted)]">Boosting isn't available on this job{b.reason ? `: ${b.reason}` : ""}.</p>
+        : (
+          <>
+            {b.skip && <p className="mt-2 text-[13px] text-[var(--color-warn)]">Upwork advises against boosting this one.</p>}
+            <p className="mt-2 text-[13px] text-[var(--color-muted)]">
+              {b.topBids == null ? "Current bids unknown." : b.topBids.length ? `Current top bids: ${b.topBids.join(", ")} Connects.` : "No one has boosted yet."}
+              {b.recommended != null ? ` Minimum for a top slot: ${b.recommended}.` : ""}{b.max != null ? ` Most you can bid: ${b.max}.` : ""}
+            </p>
+            {b.note && <p className="mt-1 text-[13px] text-[var(--color-muted)]">{b.note}</p>}
+            <form className="mt-3 flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); if (valid) onSet(n); }}>
+              <label className="field w-[140px]"><span>Connects</span>
+                <input className="input num" type="number" min={Math.max(1, b.recommended ?? 1)} max={b.max ?? undefined} step="1" inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>
+              <button type="submit" className="btn btn-sm" disabled={busy || !valid || n === current}>{busy ? <><Spinner />Updating…</> : current != null ? "Change boost" : "Boost"}</button>
+              {current != null && <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => onSet(null)}>Remove boost</button>}
+            </form>
+            <p className="mt-2 text-[13px] text-[var(--color-muted)]">{current != null ? `Boosted with ${current} Connects. ` : ""}Rebuilds the Upwork preview; nothing is sent until you submit.</p>
+          </>
+        )}
+      {error}
     </div>
   );
 }

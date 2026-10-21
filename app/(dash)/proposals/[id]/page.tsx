@@ -4,6 +4,7 @@ import { IconExternal, IconGlobe } from "@/components/icons";
 import { ProposalEditor } from "@/components/ProposalEditor";
 import { getJob, getProposal } from "@/lib/db";
 import { jobUrl, timeAgo } from "@/lib/format";
+import { portfolioChoices } from "@/lib/proposals/portfolio";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,8 @@ export default async function ProposalPage({ params }: { params: Promise<{ id: s
   if (!p) notFound();
   const job = await getJob(p.jobId);
   const url = p.jobUrl || (job ? jobUrl(job.ciphertext) : null);
+  // Cache only - opening a proposal never calls Upwork; the editor's Refresh button does.
+  const portfolio = await portfolioChoices(p.jobId).catch(() => ({ upwork: { items: [], checkedAt: null, canRefresh: false }, site: { relevant: [], projects: [] } }));
   return (
     <>
       <nav aria-label="Breadcrumb" className="mb-3 flex min-w-0 items-center gap-3 text-[14px] text-[var(--color-muted)]">
@@ -36,7 +39,7 @@ export default async function ProposalPage({ params }: { params: Promise<{ id: s
           {url && <a className="btn" href={url} target="_blank" rel="noopener noreferrer">Open in Upwork <IconExternal size={16} /></a>}
         </div>
       </div>
-      <ProposalEditor initial={p} screeningQuestions={job?.enrichment?.screeningQuestions ?? []} connectsCost={job?.enrichment?.connectsCost ?? null} />
+      <ProposalEditor initial={p} screeningQuestions={job?.enrichment?.screeningQuestions ?? []} connectsCost={job?.enrichment?.connectsCost ?? null} portfolio={portfolio} />
     </>
   );
 }

@@ -420,4 +420,22 @@ describe("phone actions via the Supabase queue", () => {
     expect(await acquireLease("mac:1", 60_000)).toBe(true);
     expect(await acquireLease("home:2", 60_000, Date.now() + 120_000)).toBe(true); // lease expired → takeover
   });
+
+  it("saves attached portfolio items from the phone and lists the choices without calling Upwork", async () => {
+    const { dispatch } = await import("@/lib/actions");
+    const { approve } = await import("@/lib/proposals/submit");
+    const { createProposal, getProposal, kvSet } = await import("@/lib/db");
+    await kvSet("upwork_highlights", { fetchedAt: Date.now() - 2 * 864e5, certificates: [], portfolio_projects: [{ id: "pp1", title: "RAG for a law firm" }] });
+    const p = await createProposal({ jobId: "j10", jobTitle: "t", jobUrl: "u", status: "ready", coverLetter: "Hi Ann,\n\nOpener.\n\nThanks, David", research: null, answers: [], bid: 100, estimatedDuration: null, portfolioProjectIds: [], loomUrl: null, approvedAt: null, preview: null, previewId: null, submittedAt: null, originalDraft: "x", model: null, promptVersion: null });
+    await approve(p.id);
+    const edited = await dispatch(`/api/proposals/${p.id}`, "PATCH", { portfolioProjectIds: ["pp1"] }) as { portfolioProjectIds: string[]; status: string };
+    expect(edited.portfolioProjectIds).toEqual(["pp1"]);
+    expect(edited.status).toBe("ready"); // a real change asks for a fresh approval
+    expect((await getProposal(p.id))?.portfolioProjectIds).toEqual(["pp1"]);
+    // A stale cache is still returned as-is: listing never calls Upwork, only ?refresh=1 does.
+    const choices = await dispatch("/api/portfolio?jobId=j10", "GET") as { upwork: { items: { id: string }[] }; site: { projects: { url: string }[] } };
+    expect(choices.upwork.items.map((i) => i.id)).toEqual(["pp1"]);
+    expect(choices.site.projects.length).toBeGreaterThan(0);
+    expect(choices.site.projects.every((x) => x.url.startsWith("https://"))).toBe(true);
+  });
 });

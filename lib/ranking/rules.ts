@@ -1,5 +1,6 @@
 import type { Job, JobCategory, JobEnrichment, LlmRanking, RankingRules, RuleFlag, RuleResult } from "../types";
 import { proposalsLow } from "../upwork/tiers";
+import { malwareLure } from "./scam";
 
 /**
  * The client's hire count, or null when we don't actually know it (David, 2026-10-19). Upwork's keyword/saved-search
@@ -212,6 +213,8 @@ export function evaluateRules(job: Job, rules: RankingRules, ctx: RuleContext = 
   }
   const where = locationRequirement(`${job.title}\n${e?.description || job.description}`);
   if (where) flag("location_restricted", `Location requirement: "${where}" - remote worldwide work only`, "red", 35);
+  const lure = malwareLure(job, e);
+  if (lure) flag(lure.code, lure.label, lure.severity, lure.severity === "red" ? 40 : 8);
 
   // A client with history but no loaded record: say so instead of showing "no flags".
   if (!e && !rejected && (job.client.totalSpent > 0 || job.client.totalHires > 0)) {

@@ -59,7 +59,7 @@ export async function autoDraftCandidates(now = Date.now()): Promise<CachedJob[]
   const s = settings.autoDraft;
   const onTime = (j: CachedJob) => draftTiming(j, settings.autoApply.timezone, now) === null;
   const drafted = new Set((await listProposals()).map((p) => p.jobId));
-  const fresh = (j: CachedJob) => !j.score.excluded && !drafted.has(j.id) && j.score.intent?.ghostRisk !== "high" && now - new Date(j.fetchedAt).getTime() < 864e5;
+  const fresh = (j: CachedJob) => !j.score.excluded && !drafted.has(j.id) && !j.score.rules?.flags.some((f) => f.code === "malware_lure") && j.score.intent?.ghostRisk !== "high" && now - new Date(j.fetchedAt).getTime() < 864e5;
   // High ghost risk (likely not hiring) never gets an automatic draft - rules unchanged, advisory only.
   const ranked = (await listJobs({ status: "all", minScore: s.minRank }))
     .filter((j) => fresh(j) && j.score.llm && j.enrichment)
